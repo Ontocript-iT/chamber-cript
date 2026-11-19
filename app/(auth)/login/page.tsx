@@ -111,11 +111,32 @@ export default function LoginPage() {
 
                     if (userData.firmId && userData.role !== 'SUPER_ADMIN') {
                         const firmDoc = await getDoc(doc(db, 'firms', userData.firmId));
-                        if (firmDoc.exists() && firmDoc.data().isActive === false) {
-                            await auth.signOut();
-                            throw new Error(
-                                "Your Law Firm's account has been suspended. Contact Super Admin."
-                            );
+                        if (firmDoc.exists()) {
+                            const fData = firmDoc.data();
+
+                            if (fData.approvalStatus === 'PENDING') {
+                                await auth.signOut();
+                                recaptchaRef.current?.reset();
+                                setCaptchaVal(null);
+                                setError('Your Law Firm registration is still pending Super Admin approval.');
+                                return;
+                            }
+
+                            if (fData.approvalStatus === 'REJECTED') {
+                                await auth.signOut();
+                                recaptchaRef.current?.reset();
+                                setCaptchaVal(null);
+                                setError('Your Law Firm registration was rejected. Contact Super Admin.');
+                                return;
+                            }
+
+                            if (fData.isActive === false) {
+                                await auth.signOut();
+                                recaptchaRef.current?.reset();
+                                setCaptchaVal(null);
+                                setError("Access Denied: Your Law Firm's system access has been suspended.");
+                                return;
+                            }
                         }
                     }
 
@@ -123,6 +144,8 @@ export default function LoginPage() {
                         router.push('/superadmin');
                     } else if (userData.isFirstLogin) {
                         router.push('/change-password');
+                    } else if (!userData.pin) {
+                        router.push('/setup-pin');
                     } else {
                         router.push('/verify-pin');
                     }
@@ -131,13 +154,22 @@ export default function LoginPage() {
                 }
             }
         } catch (err: any) {
-            console.error(err);
-            if (err.code === 'auth/invalid-credential') {
-                setError('Incorrect email or password. Please try again.');
+            recaptchaRef.current?.reset();
+            setCaptchaVal(null);
+
+            if (
+                err?.code === 'auth/invalid-credential' ||
+                err?.code === 'auth/wrong-password' ||
+                err?.code === 'auth/user-not-found'
+            ) {
+                setError('Invalid email or password. Please check your credentials and try again.');
+            } else if (err?.code === 'auth/too-many-requests') {
+                setError('Too many failed login attempts. Please wait a few minutes or reset your password.');
+            } else if (err?.code === 'auth/invalid-email') {
+                setError('Please enter a valid email address.');
             } else {
-                setError(err.message || 'An error occurred during login.');
+                setError(err?.message || 'Sign in failed. Please try again.');
             }
-            resetCaptcha();
         } finally {
             setLoading(false);
         }

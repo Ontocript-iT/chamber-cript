@@ -2,15 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, collection, addDoc } from 'firebase/firestore';
+import { doc, setDoc, collection } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
     Scale,
     User,
     Building2,
     Mail,
+    Phone,
     Lock,
     Eye,
     EyeOff,
@@ -21,20 +21,22 @@ import {
     Users,
     Briefcase,
     Loader2,
+    CheckCircle2,
+    Clock,
 } from 'lucide-react';
 
 export default function RegisterPage() {
-    const router = useRouter();
-
     const [name, setName] = useState('');
     const [firmName, setFirmName] = useState('');
     const [email, setEmail] = useState('');
+    const [phone, setPhone] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [registrationSubmitted, setRegistrationSubmitted] = useState(false);
     const [currentYear, setCurrentYear] = useState<number>(2026);
 
     useEffect(() => {
@@ -56,22 +58,33 @@ export default function RegisterPage() {
 
         try {
             // 1. Create User in Firebase Auth
-            const userCred = await createUserWithEmailAndPassword(auth, email, password);
+            const userCred = await createUserWithEmailAndPassword(auth, email.trim(), password);
             const uid = userCred.user.uid;
 
-            // 2. Create the Law Firm document
-            const firmRef = await addDoc(collection(db, 'lawFirms'), {
+            // 2. Generate a single Firm document ID in 'firms' (matches Super Admin & Layout)
+            const firmRef = doc(collection(db, 'firms'));
+            const firmId = firmRef.id;
+            const now = new Date().toISOString();
+
+            await setDoc(firmRef, {
                 name: firmName.trim(),
                 ownerId: uid,
-                createdAt: new Date().toISOString(),
+                ownerName: name.trim(),
+                email: email.trim(),
+                phone: phone.trim(),
+                smsQuota: 100, // Trial quota granted once approved
+                isActive: false, // Locked until Super Admin approves
+                approvalStatus: 'PENDING',
+                createdAt: now,
             });
 
-            // 3. Create the User Profile in Firestore
+            // 3. Save Principal Lawyer profile linked to firmId
             await setDoc(doc(db, 'users', uid), {
                 email: email.trim(),
                 name: name.trim(),
-                role: 'LAWYER', // Primary owner role
-                firmId: firmRef.id,
+                phone: phone.trim(),
+                role: 'LAWYER',
+                firmId: firmId,
                 permissions: [
                     'cases.read',
                     'cases.write',
@@ -80,12 +93,14 @@ export default function RegisterPage() {
                     'staff.manage',
                     'sms.send',
                 ],
-                isFirstLogin: false, // Owner sets their password right away
-                pin: null, // Still needs to set a PIN
-                createdAt: new Date().toISOString(),
+                isFirstLogin: false,
+                pin: null,
+                createdAt: now,
             });
 
-            router.push('/setup-pin'); // Redirect to set up their 6-digit PIN
+            // 4. Sign out immediately so the lawyer waits for Super Admin approval
+            await auth.signOut();
+            setRegistrationSubmitted(true);
         } catch (err: any) {
             console.error(err);
             if (err.code === 'auth/email-already-in-use') {
@@ -108,13 +123,13 @@ export default function RegisterPage() {
         },
         {
             icon: ShieldCheck,
-            title: '2. Configure 6-Digit PIN',
-            description: 'Add a second security layer for sensitive case access',
+            title: '2. Super Admin Verification',
+            description: 'Your chamber is reviewed and activated by the administrator',
         },
         {
             icon: Users,
-            title: '3. Onboard Your Team',
-            description: 'Invite junior lawyers and clerks with custom permissions',
+            title: '3. PIN Setup & Team Onboarding',
+            description: 'Set your 6-digit PIN and invite junior lawyers and clerks',
         },
     ];
 
@@ -173,7 +188,7 @@ export default function RegisterPage() {
                     </p>
                 </aside>
 
-                {/* Right Registration Form */}
+                {/* Right Registration Form or Pending Approval Confirmation */}
                 <main className="lg:col-span-7 p-6 sm:p-10 lg:p-12 flex flex-col justify-center">
                     {/* Top Back to Home Action */}
                     <div className="flex items-center justify-between mb-6">
@@ -203,239 +218,298 @@ export default function RegisterPage() {
                         </span>
                     </div>
 
-                    <div className="mb-6 text-center lg:text-left">
-                        <h1 className="text-2xl sm:text-3xl font-black text-[#232e39] dark:text-white tracking-tight">
-                            Register Law Firm
-                        </h1>
-                        <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-                            Create your principal lawyer account to initialize your chamber
-                        </p>
-                    </div>
+                    {registrationSubmitted ? (
+                        <div className="py-6 text-center space-y-5">
+                            <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 flex items-center justify-center mx-auto">
+                                <Clock size={32} />
+                            </div>
 
-                    {error && (
-                        <div
-                            role="alert"
-                            className="mb-5 p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 rounded-2xl flex items-start gap-3"
-                        >
-                            <AlertCircle
-                                size={18}
-                                className="text-rose-600 dark:text-rose-400 shrink-0 mt-0.5"
-                            />
-                            <p className="text-xs sm:text-sm text-rose-700 dark:text-rose-300 font-semibold">
-                                {error}
-                            </p>
-                        </div>
-                    )}
+                            <div className="space-y-2 max-w-md mx-auto">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 text-xs font-extrabold">
+                                    <CheckCircle2 size={14} /> Registration Submitted
+                                </span>
+                                <h1 className="text-2xl sm:text-3xl font-black text-[#232e39] dark:text-white tracking-tight pt-1">
+                                    Awaiting Admin Approval
+                                </h1>
+                                <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                    Your chamber <strong className="text-[#232e39] dark:text-white">{firmName}</strong> has been registered under <strong className="text-[#232e39] dark:text-white">{email}</strong>. System access is locked until the Super Admin verifies and approves your account.
+                                </p>
+                            </div>
 
-                    <form onSubmit={handleRegister} className="space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {/* Full Name */}
-                            <div>
-                                <label
-                                    htmlFor="fullName"
-                                    className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
+                            <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center max-w-sm mx-auto">
+                                <Link
+                                    href="/login"
+                                    className="w-full py-3.5 px-6 bg-[#232e39] hover:bg-[#334252] dark:bg-[#3e5063] dark:hover:bg-[#4c6178] text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg"
                                 >
-                                    Full Name
-                                </label>
-                                <div className="relative">
-                                    <User
-                                        size={17}
-                                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                                    />
-                                    <input
-                                        id="fullName"
-                                        type="text"
-                                        autoComplete="name"
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
-                                        placeholder="A. B. Perera, AAL"
-                                        className={inputStyle}
-                                        required
-                                    />
-                                </div>
+                                    Go to Sign In <ArrowRight size={16} />
+                                </Link>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="mb-6 text-center lg:text-left">
+                                <h1 className="text-2xl sm:text-3xl font-black text-[#232e39] dark:text-white tracking-tight">
+                                    Register Law Firm
+                                </h1>
+                                <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+                                    Create your principal lawyer account to initialize your chamber
+                                </p>
                             </div>
 
-                            {/* Law Firm Name */}
-                            <div>
-                                <label
-                                    htmlFor="firmName"
-                                    className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
+                            {error && (
+                                <div
+                                    role="alert"
+                                    className="mb-5 p-4 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 rounded-2xl flex items-start gap-3"
                                 >
-                                    Law Firm / Chamber Name
-                                </label>
-                                <div className="relative">
-                                    <Building2
-                                        size={17}
-                                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                    <AlertCircle
+                                        size={18}
+                                        className="text-rose-600 dark:text-rose-400 shrink-0 mt-0.5"
                                     />
-                                    <input
-                                        id="firmName"
-                                        type="text"
-                                        autoComplete="organization"
-                                        value={firmName}
-                                        onChange={(e) => setFirmName(e.target.value)}
-                                        placeholder="Perera & Associates"
-                                        className={inputStyle}
-                                        required
-                                    />
+                                    <p className="text-xs sm:text-sm text-rose-700 dark:text-rose-300 font-semibold">
+                                        {error}
+                                    </p>
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Email Address */}
-                        <div>
-                            <label
-                                htmlFor="email"
-                                className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
-                            >
-                                Official Email Address
-                            </label>
-                            <div className="relative">
-                                <Mail
-                                    size={17}
-                                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                                />
-                                <input
-                                    id="email"
-                                    type="email"
-                                    autoComplete="email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    placeholder="counsel@firm.lk"
-                                    className={inputStyle}
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        {/* Password & Confirm Password */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {/* Password */}
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label
-                                        htmlFor="password"
-                                        className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300"
-                                    >
-                                        Password
-                                    </label>
-                                    <span className="text-[10px] font-semibold text-slate-400">
-                                        Min. 8 chars
-                                    </span>
-                                </div>
-                                <div className="relative">
-                                    <Lock
-                                        size={17}
-                                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                                    />
-                                    <input
-                                        id="password"
-                                        type={showPassword ? 'text' : 'password'}
-                                        autoComplete="new-password"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                        placeholder="••••••••"
-                                        minLength={8}
-                                        className={`${inputStyle} pr-11`}
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPassword((prev) => !prev)}
-                                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#232e39] dark:hover:text-white transition cursor-pointer"
-                                    >
-                                        {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Confirm Password */}
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <label
-                                        htmlFor="confirmPassword"
-                                        className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300"
-                                    >
-                                        Confirm Password
-                                    </label>
-                                    {passwordsMismatch && (
-                                        <span className="text-[10px] font-bold text-rose-500">
-                                            Does not match
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="relative">
-                                    <Lock
-                                        size={17}
-                                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-                                    />
-                                    <input
-                                        id="confirmPassword"
-                                        type={showConfirmPassword ? 'text' : 'password'}
-                                        autoComplete="new-password"
-                                        value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
-                                        placeholder="••••••••"
-                                        minLength={8}
-                                        className={`${inputStyle} pr-11 ${
-                                            passwordsMismatch
-                                                ? 'border-rose-400 dark:border-rose-500 focus:border-rose-500 focus:ring-rose-500/15'
-                                                : ''
-                                        }`}
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowConfirmPassword((prev) => !prev)}
-                                        aria-label={
-                                            showConfirmPassword
-                                                ? 'Hide confirm password'
-                                                : 'Show confirm password'
-                                        }
-                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#232e39] dark:hover:text-white transition cursor-pointer"
-                                    >
-                                        {showConfirmPassword ? (
-                                            <EyeOff size={17} />
-                                        ) : (
-                                            <Eye size={17} />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Submit Button */}
-                        <button
-                            type="submit"
-                            disabled={loading || passwordsMismatch}
-                            className="w-full py-3.5 bg-[#232e39] hover:bg-[#334252] dark:bg-[#3e5063] dark:hover:bg-[#4c6178] text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-slate-900/10 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer mt-2"
-                        >
-                            {loading ? (
-                                <>
-                                    <Loader2 size={17} className="animate-spin" />
-                                    Creating Chamber Account...
-                                </>
-                            ) : (
-                                <>
-                                    <Briefcase size={17} />
-                                    Register Firm &amp; Continue
-                                    <ArrowRight size={17} />
-                                </>
                             )}
-                        </button>
 
-                        {/* Sign In Link */}
-                        <p className="text-center text-xs sm:text-sm text-slate-600 dark:text-slate-300 pt-2">
-                            Already registered your chamber?{' '}
-                            <Link
-                                href="/login"
-                                className="font-extrabold text-[#232e39] dark:text-white hover:underline"
-                            >
-                                Sign In
-                            </Link>
-                        </p>
-                    </form>
+                            <form onSubmit={handleRegister} className="space-y-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {/* Full Name */}
+                                    <div>
+                                        <label
+                                            htmlFor="fullName"
+                                            className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
+                                        >
+                                            Full Name
+                                        </label>
+                                        <div className="relative">
+                                            <User
+                                                size={17}
+                                                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                            />
+                                            <input
+                                                id="fullName"
+                                                type="text"
+                                                autoComplete="name"
+                                                value={name}
+                                                onChange={(e) => setName(e.target.value)}
+                                                placeholder="A. B. Perera, AAL"
+                                                className={inputStyle}
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Law Firm Name */}
+                                    <div>
+                                        <label
+                                            htmlFor="firmName"
+                                            className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
+                                        >
+                                            Law Firm / Chamber Name
+                                        </label>
+                                        <div className="relative">
+                                            <Building2
+                                                size={17}
+                                                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                            />
+                                            <input
+                                                id="firmName"
+                                                type="text"
+                                                autoComplete="organization"
+                                                value={firmName}
+                                                onChange={(e) => setFirmName(e.target.value)}
+                                                placeholder="Perera & Associates"
+                                                className={inputStyle}
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {/* Email Address */}
+                                    <div>
+                                        <label
+                                            htmlFor="email"
+                                            className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
+                                        >
+                                            Official Email Address
+                                        </label>
+                                        <div className="relative">
+                                            <Mail
+                                                size={17}
+                                                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                            />
+                                            <input
+                                                id="email"
+                                                type="email"
+                                                autoComplete="email"
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
+                                                placeholder="counsel@firm.lk"
+                                                className={inputStyle}
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Contact Phone */}
+                                    <div>
+                                        <label
+                                            htmlFor="phone"
+                                            className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-2"
+                                        >
+                                            Contact Number
+                                        </label>
+                                        <div className="relative">
+                                            <Phone
+                                                size={17}
+                                                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                            />
+                                            <input
+                                                id="phone"
+                                                type="tel"
+                                                autoComplete="tel"
+                                                value={phone}
+                                                onChange={(e) => setPhone(e.target.value)}
+                                                placeholder="077 123 4567"
+                                                className={inputStyle}
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Password & Confirm Password */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {/* Password */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <label
+                                                htmlFor="password"
+                                                className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+                                            >
+                                                Password
+                                            </label>
+                                            <span className="text-[10px] font-semibold text-slate-400">
+                                                Min. 8 chars
+                                            </span>
+                                        </div>
+                                        <div className="relative">
+                                            <Lock
+                                                size={17}
+                                                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                            />
+                                            <input
+                                                id="password"
+                                                type={showPassword ? 'text' : 'password'}
+                                                autoComplete="new-password"
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                placeholder="••••••••"
+                                                minLength={8}
+                                                className={`${inputStyle} pr-11`}
+                                                required
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword((prev) => !prev)}
+                                                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#232e39] dark:hover:text-white transition cursor-pointer"
+                                            >
+                                                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Confirm Password */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <label
+                                                htmlFor="confirmPassword"
+                                                className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+                                            >
+                                                Confirm Password
+                                            </label>
+                                            {passwordsMismatch && (
+                                                <span className="text-[10px] font-bold text-rose-500">
+                                                    Does not match
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="relative">
+                                            <Lock
+                                                size={17}
+                                                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                                            />
+                                            <input
+                                                id="confirmPassword"
+                                                type={showConfirmPassword ? 'text' : 'password'}
+                                                autoComplete="new-password"
+                                                value={confirmPassword}
+                                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                                placeholder="••••••••"
+                                                minLength={8}
+                                                className={`${inputStyle} pr-11 ${
+                                                    passwordsMismatch
+                                                        ? 'border-rose-400 dark:border-rose-500 focus:border-rose-500 focus:ring-rose-500/15'
+                                                        : ''
+                                                }`}
+                                                required
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowConfirmPassword((prev) => !prev)}
+                                                aria-label={
+                                                    showConfirmPassword
+                                                        ? 'Hide confirm password'
+                                                        : 'Show confirm password'
+                                                }
+                                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#232e39] dark:hover:text-white transition cursor-pointer"
+                                            >
+                                                {showConfirmPassword ? (
+                                                    <EyeOff size={17} />
+                                                ) : (
+                                                    <Eye size={17} />
+                                                )}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Submit Button */}
+                                <button
+                                    type="submit"
+                                    disabled={loading || passwordsMismatch}
+                                    className="w-full py-3.5 bg-[#232e39] hover:bg-[#334252] dark:bg-[#3e5063] dark:hover:bg-[#4c6178] text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition shadow-lg shadow-slate-900/10 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer mt-2"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Loader2 size={17} className="animate-spin" />
+                                            Creating Chamber Account...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Briefcase size={17} />
+                                            Register Firm &amp; Continue
+                                            <ArrowRight size={17} />
+                                        </>
+                                    )}
+                                </button>
+
+                                {/* Sign In Link */}
+                                <p className="text-center text-xs sm:text-sm text-slate-600 dark:text-slate-300 pt-2">
+                                    Already registered your chamber?{' '}
+                                    <Link
+                                        href="/login"
+                                        className="font-extrabold text-[#232e39] dark:text-white hover:underline"
+                                    >
+                                        Sign In
+                                    </Link>
+                                </p>
+                            </form>
+                        </>
+                    )}
                 </main>
             </div>
         </div>

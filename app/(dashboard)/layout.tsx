@@ -23,6 +23,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [mounted, setMounted] = useState(false);
 
+
+
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<any[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -121,19 +123,40 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     if (loading) return <div className="flex h-screen items-center justify-center bg-background"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand"></div></div>;
 
     const isSuperAdmin = activeUser?.role === 'SUPER_ADMIN';
-    const isFirmSuspended = !isSuperAdmin && firmData && firmData.isActive === false;
     const isQuotaLow = !isSuperAdmin && firmData && (firmData.smsQuota || 0) <= 50;
     const pendingTasks = myTasks.filter(t => t.status !== 'Completed');
     const completedTasks = myTasks.filter(t => t.status === 'Completed');
     const displayTasks = taskView === 'PENDING' ? pendingTasks : completedTasks;
 
+    const isFirmPending = !isSuperAdmin && firmData && firmData.approvalStatus === 'PENDING';
+    const isFirmSuspended = !isSuperAdmin && firmData && (firmData.isActive === false || firmData.approvalStatus === 'REJECTED');
+
+    if (isFirmPending) {
+        return (
+            <div className="flex flex-col items-center justify-center h-screen bg-background text-center p-6">
+                <Clock size={64} className="text-amber-500 mb-4" />
+                <h1 className="text-3xl font-black mb-2">Account Pending Approval</h1>
+                <p className="text-gray-500 max-w-md">
+                    Your Law Firm registration is awaiting verification by the Super Admin. You and your staff will gain access once approved.
+                </p>
+                <button onClick={handleLogout} className="mt-6 px-6 py-2.5 bg-brand-dark text-white rounded-xl font-bold cursor-pointer">
+                    Logout
+                </button>
+            </div>
+        );
+    }
+
     if (isFirmSuspended) {
         return (
             <div className="flex flex-col items-center justify-center h-screen bg-background text-center p-6">
                 <ShieldAlert size={64} className="text-red-500 mb-4" />
-                <h1 className="text-3xl font-bold mb-2">Account Suspended</h1>
-                <p className="text-gray-500 max-w-md">Your law firm&apos;s account has been suspended due to pending payments or admin restrictions. Please contact the Super Admin.</p>
-                <button onClick={handleLogout} className="mt-6 px-6 py-2.5 bg-brand-dark text-white rounded-lg font-bold">Logout</button>
+                <h1 className="text-3xl font-black mb-2">System Access Denied</h1>
+                <p className="text-gray-500 max-w-md">
+                    Access for your Law Firm and all team members has been suspended due to pending monthly payments or administrative restrictions. Please contact the Super Admin.
+                </p>
+                <button onClick={handleLogout} className="mt-6 px-6 py-2.5 bg-brand-dark text-white rounded-xl font-bold cursor-pointer">
+                    Logout
+                </button>
             </div>
         );
     }

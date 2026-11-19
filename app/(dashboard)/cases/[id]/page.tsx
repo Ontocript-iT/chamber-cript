@@ -579,35 +579,101 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                     <h3 className="text-sm font-bold text-[#2A3642] dark:text-white">Client</h3>
                                     <div>
                                         <label className={labelStyle}>Client name</label>
-                                        <input type="text" placeholder="Client Name" value={editForm.clientName} onChange={e => setEditForm({...editForm, clientName: e.target.value})} className={inputStyle} />
+                                        <input
+                                            type="text"
+                                            placeholder="Client Name"
+                                            value={editForm.clientName || ''}
+                                            onChange={e => setEditForm({...editForm, clientName: e.target.value})}
+                                            className={inputStyle}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className={labelStyle}>Contact no</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Contact No"
+                                            value={editForm.contactNo || ''}
+                                            onChange={e => setEditForm({...editForm, contactNo: e.target.value})}
+                                            className={inputStyle}
+                                        />
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className={labelStyle}>Contact no</label>
-                                            <input type="text" placeholder="Contact No" value={editForm.contactNo} onChange={e => setEditForm({...editForm, contactNo: e.target.value})} className={inputStyle} />
+                                            <label className={labelStyle}>ID type</label>
+                                            <select
+                                                value={editForm.idType || 'NIC'}
+                                                onChange={e => setEditForm({...editForm, idType: e.target.value})}
+                                                className={`${inputStyle} cursor-pointer`}
+                                            >
+                                                <option value="NIC">NIC</option>
+                                                <option value="Passport">Passport</option>
+                                                <option value="Driving License">Driving License</option>
+                                            </select>
                                         </div>
                                         <div>
-                                            <label className={labelStyle}>ID / NIC number</label>
-                                            <input type="text" placeholder="ID Number" value={editForm.idNumber} onChange={e => setEditForm({...editForm, idNumber: e.target.value})} className={inputStyle} />
+                                            <label className={labelStyle}>{editForm.idType || 'NIC'} number</label>
+                                            <input
+                                                type="text"
+                                                placeholder={
+                                                    editForm.idType === 'Passport'
+                                                        ? 'Passport Number'
+                                                        : editForm.idType === 'Driving License'
+                                                            ? 'Driving License Number'
+                                                            : 'NIC Number'
+                                                }
+                                                value={editForm.idNumber || ''}
+                                                onChange={e => setEditForm({...editForm, idNumber: e.target.value})}
+                                                className={inputStyle}
+                                            />
                                         </div>
                                     </div>
                                     <div>
                                         <label className={labelStyle}>Email address</label>
-                                        <input type="email" placeholder="Email" value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className={inputStyle} />
+                                        <input
+                                            type="email"
+                                            placeholder="Email"
+                                            value={editForm.email || ''}
+                                            onChange={e => setEditForm({...editForm, email: e.target.value})}
+                                            className={inputStyle}
+                                        />
                                     </div>
                                 </div>
 
                                 <div className="space-y-3 pt-6 border-t border-slate-200/80 dark:border-[#465769]/30">
                                     <h3 className="text-sm font-bold text-[#2A3642] dark:text-white">Documents</h3>
-                                    {editDocs.length === 0 && <p className="text-xs text-slate-400">No documents yet. Add one below.</p>}
+                                    {editDocs.length === 0 &&
+                                        <p className="text-xs text-slate-400">No documents yet. Add one below.</p>}
                                     {editDocs.map((d, i) => (
-                                        <div key={d.id || i} className="flex flex-wrap sm:flex-nowrap gap-3 items-center bg-[#F8FAFC] dark:bg-[#1E2730] p-3 rounded-xl border border-dashed border-slate-300 dark:border-[#465769]/50">
-                                            <input type="text" value={d.name} onChange={e => { const nd = [...editDocs]; nd[i].name = e.target.value; setEditDocs(nd); }} className="px-3 py-2 bg-white dark:bg-[#2A3642] border border-slate-200 dark:border-[#465769]/50 rounded-lg w-full sm:w-2/5 text-xs font-semibold outline-none focus:border-[#465769] dark:text-white" placeholder="Document name"/>
-                                            {d.url ? <span className="text-xs text-emerald-600 font-bold truncate flex-1">Uploaded</span> : <input type="file" onChange={e => { const nd = [...editDocs]; nd[i].file = e.target.files?.[0]; setEditDocs(nd); }} className="flex-1 min-w-0 text-xs dark:text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#2A3642] dark:file:bg-[#465769] file:text-white hover:file:opacity-90 file:cursor-pointer" />}
-                                            <button onClick={() => setEditDocs(editDocs.filter((_, idx) => idx !== i))} aria-label="Remove document" className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition"><Trash2 size={16}/></button>
+                                        <div key={d.id || i}
+                                             className="flex flex-wrap sm:flex-nowrap gap-3 items-center bg-[#F8FAFC] dark:bg-[#1E2730] p-3 rounded-xl border border-dashed border-slate-300 dark:border-[#465769]/50">
+                                            <input type="text" value={d.name} onChange={e => {
+                                                const nd = [...editDocs];
+                                                nd[i].name = e.target.value;
+                                                setEditDocs(nd);
+                                            }}
+                                                   className="px-3 py-2 bg-white dark:bg-[#2A3642] border border-slate-200 dark:border-[#465769]/50 rounded-lg w-full sm:w-2/5 text-xs font-semibold outline-none focus:border-[#465769] dark:text-white"
+                                                   placeholder="Document name"/>
+                                            {d.url ? <span
+                                                    className="text-xs text-emerald-600 font-bold truncate flex-1">Uploaded</span> :
+                                                <input type="file" onChange={e => {
+                                                    const nd = [...editDocs];
+                                                    nd[i].file = e.target.files?.[0];
+                                                    setEditDocs(nd);
+                                                }}
+                                                       className="flex-1 min-w-0 text-xs dark:text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#2A3642] dark:file:bg-[#465769] file:text-white hover:file:opacity-90 file:cursor-pointer"/>}
+                                            <button onClick={() => setEditDocs(editDocs.filter((_, idx) => idx !== i))}
+                                                    aria-label="Remove document"
+                                                    className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition">
+                                                <Trash2 size={16}/></button>
                                         </div>
                                     ))}
-                                    <button onClick={() => setEditDocs([...editDocs, { id: Date.now().toString(), name: '' }])} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#465769] dark:text-slate-300 hover:text-[#2A3642] dark:hover:text-white cursor-pointer transition"><Plus size={14}/> Add document</button>
+                                    <button onClick={() => setEditDocs([...editDocs, {
+                                        id: Date.now().toString(),
+                                        name: ''
+                                    }])}
+                                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#465769] dark:text-slate-300 hover:text-[#2A3642] dark:hover:text-white cursor-pointer transition">
+                                        <Plus size={14}/> Add document
+                                    </button>
                                 </div>
 
                                 {/* Sticky save bar */}
@@ -619,31 +685,37 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                         ) : (
                             <div className="p-5 sm:p-6 space-y-6">
                                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                                    <Field label="Reference no" value={caseData.referenceNo} />
-                                    <Field label="Court case no" value={caseData.courtCaseNo} />
-                                    <Field label="Chamber ref" value={caseData.chamberRef} />
-                                    <Field label="Case type" value={caseData.type} />
+                                    <Field label="Reference no" value={caseData.referenceNo}/>
+                                    <Field label="Court case no" value={caseData.courtCaseNo}/>
+                                    <Field label="Chamber ref" value={caseData.chamberRef}/>
+                                    <Field label="Case type" value={caseData.type}/>
                                 </div>
 
                                 <div className="pt-5 border-t border-slate-200/80 dark:border-[#465769]/30">
-                                    <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3 flex items-center gap-2"><User size={15} className="text-[#465769] dark:text-slate-400" /> Client</h3>
+                                    <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3 flex items-center gap-2">
+                                        <User size={15} className="text-[#465769] dark:text-slate-400"/> Client
+                                    </h3>
                                     <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                                        <Field label="Name" value={caseData.clientName} />
-                                        <Field label="Contact number" value={caseData.contactNo} />
-                                        <Field label="ID / NIC number" value={caseData.idNumber} />
-                                        <Field label="Email" value={caseData.email} />
+                                        <Field label="Name" value={caseData.clientName}/>
+                                        <Field label="Contact number" value={caseData.contactNo}/>
+                                        <Field label={`${caseData.idType || 'NIC'} number`} value={caseData.idNumber}/>
+                                        <Field label="Email" value={caseData.email}/>
                                     </div>
                                 </div>
 
                                 <div className="pt-5 border-t border-slate-200/80 dark:border-[#465769]/30">
-                                    <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3">Documents ({docCount})</h3>
+                                    <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3">Documents
+                                        ({docCount})</h3>
                                     {docCount === 0 ? (
-                                        <p className="text-xs text-slate-400">No documents attached.{userPerms.write ? ' Use Edit case to add some.' : ''}</p>
+                                        <p className="text-xs text-slate-400">No documents
+                                            attached.{userPerms.write ? ' Use Edit case to add some.' : ''}</p>
                                     ) : (
                                         <div className="space-y-2">
                                             {caseData.documents?.map((d: any, i: number) => (
-                                                <a key={i} href={d.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 text-sm font-medium bg-[#F8FAFC] dark:bg-[#1E2730] text-[#2A3642] dark:text-slate-200 px-4 py-3 rounded-xl border border-slate-200 dark:border-[#465769]/50 hover:border-[#465769] dark:hover:border-slate-400 transition">
-                                                    <FileText size={16} className="text-[#465769] dark:text-slate-400 shrink-0" />
+                                                <a key={i} href={d.url} target="_blank" rel="noreferrer"
+                                                   className="flex items-center gap-3 text-sm font-medium bg-[#F8FAFC] dark:bg-[#1E2730] text-[#2A3642] dark:text-slate-200 px-4 py-3 rounded-xl border border-slate-200 dark:border-[#465769]/50 hover:border-[#465769] dark:hover:border-slate-400 transition">
+                                                    <FileText size={16}
+                                                              className="text-[#465769] dark:text-slate-400 shrink-0"/>
                                                     <span className="truncate">{d.name}</span>
                                                 </a>
                                             ))}
@@ -656,7 +728,9 @@ export default function AdvancedCaseViewPage(props: PageProps) {
 
                     {/* ---------- RIGHT: TABS (TIMELINE / MESSAGES) ---------- */}
                     <section className={`${cardStyle} xl:col-span-7`}>
-                        <div className="px-3 sm:px-4 border-b border-slate-200/80 dark:border-[#465769]/40 flex items-center gap-1" role="tablist">
+                        <div
+                            className="px-3 sm:px-4 border-b border-slate-200/80 dark:border-[#465769]/40 flex items-center gap-1"
+                            role="tablist">
                             <button
                                 role="tab" aria-selected={activeTab === 'timeline'}
                                 onClick={() => setActiveTab('timeline')}
