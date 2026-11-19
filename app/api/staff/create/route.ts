@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebaseAdmin';
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { sendStaffInviteEmail } from '@/lib/brevo';
 
 export async function POST(req: Request) {
     try {
+        const adminAuth = getAdminAuth();
+        const adminDb = getAdminDb();
+
         const { email, name, role, permissions, firmId } = await req.json();
 
         // 1. Generate a secure random temporary password
-        const tempPassword = Math.random().toString(36).slice(-8) + "A1!";
+        const tempPassword = Math.random().toString(36).slice(-8) + 'A1!';
 
         // 2. Create User in Firebase Auth via Admin SDK
         const userRecord = await adminAuth.createUser({
