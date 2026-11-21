@@ -66,10 +66,12 @@ export default function SetupPinPage() {
                 throw new Error('Unable to identify authenticated user.');
             }
 
-            // Note: In production, consider hashing PINs server-side before storage.
             await updateDoc(doc(db, 'users', user.uid), {
                 pin,
             });
+
+            localStorage.setItem('chamber_auth_active', 'true');
+            sessionStorage.setItem('chamber_pin_verified', 'true');
 
             setSuccess('Your 6-digit security PIN has been set! Redirecting to dashboard...');
             setTimeout(() => {
@@ -84,6 +86,8 @@ export default function SetupPinPage() {
     };
 
     const handleSignOut = async () => {
+        localStorage.removeItem('chamber_auth_active');
+        sessionStorage.removeItem('chamber_pin_verified');
         await signOut(auth);
         router.push('/login');
     };

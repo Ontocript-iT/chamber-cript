@@ -26,6 +26,9 @@ type Firm = {
     smsQuota?: number;
     isActive?: boolean;
     approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+    planType?: 'TRIAL' | 'PAID';
+    trialStartsAt?: string;
+    trialEndsAt?: string;
     createdAt?: string;
 };
 
@@ -59,7 +62,9 @@ export default function SuperAdminPage() {
     const [selectedBillingMonth, setSelectedBillingMonth] = useState('2026-11');
 
     // Law Firm Filter & Search States
-    const [firmTab, setFirmTab] = useState<'ALL' | 'UNPAID' | 'PAID' | 'PENDING' | 'ACTIVE' | 'SUSPENDED'>('ALL');
+    const [firmTab, setFirmTab] = useState<
+        'ALL' | 'UNPAID' | 'PAID' | 'TRIAL' | 'TRIAL_EXPIRED' | 'PENDING' | 'ACTIVE' | 'SUSPENDED'
+    >('ALL');
     const [firmSearch, setFirmSearch] = useState('');
 
     // SMS Quota Request Filter States
@@ -121,6 +126,32 @@ export default function SuperAdminPage() {
         setSelectedBillingMonth(curr);
         setPayMonth(curr);
     }, []);
+
+    const getTrialInfo = (firm: Firm) => {
+        if (firm.planType !== 'TRIAL' || !firm.trialEndsAt) {
+            return { isTrial: false, isExpired: false, daysLeft: null, endDateStr: '' };
+        }
+        const endMs = new Date(firm.trialEndsAt).getTime();
+        const diffMs = endMs - Date.now();
+        const isExpired = diffMs <= 0;
+        const daysLeft = isExpired ? 0 : Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        const endDateStr = new Date(firm.trialEndsAt).toLocaleDateString('en-LK', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        });
+        return { isTrial: true, isExpired, daysLeft, endDateStr };
+    };
+
+    const activeTrialFirms = firms.filter(f => {
+        const t = getTrialInfo(f);
+        return f.approvalStatus === 'APPROVED' && t.isTrial && !t.isExpired;
+    });
+
+    const expiredTrialFirms = firms.filter(f => {
+        const t = getTrialInfo(f);
+        return f.approvalStatus === 'APPROVED' && t.isTrial && t.isExpired;
+    });
 
     const fetchAllData = async () => {
         // 1. Firms
@@ -301,27 +332,87 @@ export default function SuperAdminPage() {
     const handleApproveFirm = (firm: Firm) => {
         setConfirmModal({
             isOpen: true,
-            title: 'Approve Law Firm',
-            message: `Approve "${firm.name}" and grant full system access to its Principal Lawyer and staff?`,
+            title: 'Approve Law Firm & Start 14-Day Trial',
+            message: `Approve "${firm.name}", activate their 14-day free trial, and send SMS & Email confirmation?`,
             danger: false,
             onConfirm: async () => {
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
                 try {
-                    await setDoc(doc(db, 'firms', firm.id), {
-                        approvalStatus: 'APPROVED',
-                        isActive: true,
-                        approvedAt: new Date().toISOString()
-                    }, { merge: true });
+                    const now = new Date();
+                    const trialEnd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+                    const trialEndDateStr = trialEnd.toLocaleDateString('en-LK', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                    });
 
-                    setFirms(prev => prev.map(f => f.id === firm.id ? { ...f, approvalStatus: 'APPROVED', isActive: true } : f));
-                    if (selectedFirm?.id === firm.id) {
-                        setSelectedFirm(prev => prev ? { ...prev, approvalStatus: 'APPROVED', isActive: true } : null);
+                    // 1. Update Firestore directly
+                    await setDoc(
+                        doc(db, 'firms', firm.id),
+                        {
+                            approvalStatus: 'APPROVED',
+                            isActive: true,
+                            planType: 'TRIAL',
+                            approvedAt: now.toISOString(),
+                            trialStartsAt: now.toISOString(),
+                            trialEndsAt: trialEnd.toISOString(),
+                        },
+                        { merge: true }
+                    );
+
+                    // 2. Send SMS notification if phone exists
+                    if (firm.phone) {
+                        const smsText = `ChamberCript: Your law firm "${firm.name}" is approved! Your 14-day free trial is active until ${trialEndDateStr}. Sign in now to set up your 6-digit PIN.`;
+                        await fetch('/api/sms', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ phone: firm.phone, message: smsText }),
+                        }).catch(() => {});
                     }
-                    setAlertModal({ isOpen: true, title: 'Firm Approved', message: `${firm.name} now has active access to ChamberCript.`, type: 'success' });
-                } catch (err) {
-                    setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to approve law firm.', type: 'error' });
+
+                    // 3. Send Email notification (if you have /api/notify-approval or Brevo route)
+                    if (firm.email) {
+                        await fetch('/api/admin/notify-approval', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                email: firm.email,
+                                ownerName: firm.ownerName || firm.name,
+                                firmName: firm.name,
+                                trialEndDate: trialEndDateStr,
+                            }),
+                        }).catch(() => {});
+                    }
+
+                    setFirms(prev =>
+                        prev.map(f =>
+                            f.id === firm.id
+                                ? {
+                                    ...f,
+                                    approvalStatus: 'APPROVED',
+                                    isActive: true,
+                                    planType: 'TRIAL',
+                                    trialEndsAt: trialEnd.toISOString(),
+                                }
+                                : f
+                        )
+                    );
+
+                    setAlertModal({
+                        isOpen: true,
+                        title: 'Firm Approved & Trial Activated',
+                        message: `${firm.name} is now active on a 14-day trial until ${trialEndDateStr}.`,
+                        type: 'success',
+                    });
+                } catch (err: any) {
+                    setAlertModal({
+                        isOpen: true,
+                        title: 'Error',
+                        message: err?.message || 'Failed to approve law firm.',
+                        type: 'error',
+                    });
                 }
-            }
+            },
         });
     };
 
@@ -524,6 +615,15 @@ export default function SuperAdminPage() {
             (firm.phone || '').toLowerCase().includes(q);
 
         if (!matchesSearch) return false;
+
+        const trial = getTrialInfo(firm);
+
+        if (firmTab === 'TRIAL') {
+            return firm.approvalStatus === 'APPROVED' && trial.isTrial && !trial.isExpired;
+        }
+        if (firmTab === 'TRIAL_EXPIRED') {
+            return firm.approvalStatus === 'APPROVED' && trial.isTrial && trial.isExpired;
+        }
         if (firmTab === 'UNPAID') {
             return firm.approvalStatus !== 'PENDING' && firm.approvalStatus !== 'REJECTED' && !isFirmPaidForMonth(firm.id, selectedBillingMonth);
         }
@@ -974,26 +1074,31 @@ export default function SuperAdminPage() {
 
             {/* ================= REGISTERED FIRMS DIRECTORY, UNPAID BILLING FILTER & ACCESS CONTROL ================= */}
             <div id="firms-directory-section" className="bg-white dark:bg-[#2A3642] rounded-3xl border border-slate-200/80 dark:border-[#465769]/40 shadow-sm overflow-hidden">
-                <div className="px-6 sm:px-8 py-5 bg-[#F8FAFC] dark:bg-[#222C36] border-b border-slate-200/80 dark:border-[#465769]/40 space-y-4">
+                <div
+                    className="px-6 sm:px-8 py-5 bg-[#F8FAFC] dark:bg-[#222C36] border-b border-slate-200/80 dark:border-[#465769]/40 space-y-4">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-[#2A3642] dark:bg-[#465769] text-white flex items-center justify-center">
-                                <Building2 size={19} />
+                            <div
+                                className="w-10 h-10 rounded-xl bg-[#2A3642] dark:bg-[#465769] text-white flex items-center justify-center">
+                                <Building2 size={19}/>
                             </div>
                             <div>
                                 <h2 className="text-base sm:text-lg font-extrabold text-[#2A3642] dark:text-white leading-none">
                                     Registered Law Firms, Monthly Payments & Access Control
                                 </h2>
                                 <p className="text-xs text-[#465769] dark:text-slate-400 font-medium mt-1">
-                                    Select a billing month, filter <strong className="text-rose-600 dark:text-rose-400">Not Paid Yet ({selectedBillingMonth})</strong> chambers, reset passwords, or suspend access
+                                    Select a billing month, filter <strong className="text-rose-600 dark:text-rose-400">Not
+                                    Paid Yet ({selectedBillingMonth})</strong> chambers, reset passwords, or suspend
+                                    access
                                 </p>
                             </div>
                         </div>
 
                         {/* Month Picker + Search Controls */}
                         <div className="flex flex-wrap items-center gap-2.5">
-                            <div className="flex items-center gap-2 bg-white dark:bg-[#182028] border border-slate-300 dark:border-[#465769]/80 rounded-xl px-3 py-2">
-                                <Calendar size={14} className="text-[#465769] dark:text-slate-400" />
+                            <div
+                                className="flex items-center gap-2 bg-white dark:bg-[#182028] border border-slate-300 dark:border-[#465769]/80 rounded-xl px-3 py-2">
+                                <Calendar size={14} className="text-[#465769] dark:text-slate-400"/>
                                 <span className="text-[11px] font-bold text-[#465769] dark:text-slate-400">Month:</span>
                                 <input
                                     type="month"
@@ -1005,7 +1110,8 @@ export default function SuperAdminPage() {
                             </div>
 
                             <div className="relative min-w-[230px] flex-1 sm:flex-initial">
-                                <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#465769] dark:text-slate-400" />
+                                <Search size={15}
+                                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#465769] dark:text-slate-400"/>
                                 <input
                                     type="text"
                                     placeholder="Search firm, lawyer, email, phone..."
@@ -1019,63 +1125,61 @@ export default function SuperAdminPage() {
                                         onClick={() => setFirmSearch('')}
                                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#2A3642] dark:hover:text-white cursor-pointer"
                                     >
-                                        <X size={14} />
+                                        <X size={14}/>
                                     </button>
                                 )}
                             </div>
                         </div>
                     </div>
 
-                    {/* Filter Pills */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                        <div className="flex flex-wrap bg-white dark:bg-[#182028] p-1 rounded-xl border border-slate-200 dark:border-[#465769]/60 text-xs font-bold gap-1">
-                            {([
-                                { key: 'ALL', label: `All Firms (${firms.length})` },
-                                { key: 'UNPAID', label: `Not Paid Yet • ${selectedBillingMonth} (${unpaidFirmsForSelectedMonth.length})` },
-                                { key: 'PAID', label: `Paid • ${selectedBillingMonth} (${paidFirmsForSelectedMonth.length})` },
-                                { key: 'PENDING', label: `Pending Approval (${pendingFirms.length})` },
-                                { key: 'ACTIVE', label: `Active (${activeFirms.length})` },
-                                { key: 'SUSPENDED', label: `Access Denied (${suspendedFirms.length})` },
-                            ] as const).map(tab => (
-                                <button
-                                    key={tab.key}
-                                    onClick={() => setFirmTab(tab.key)}
-                                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                                        firmTab === tab.key
-                                            ? tab.key === 'UNPAID'
-                                                ? 'bg-rose-600 text-white shadow-xs'
+                    <div
+                        className="flex flex-wrap bg-white dark:bg-[#182028] p-1 rounded-xl border border-slate-200 dark:border-[#465769]/60 text-xs font-bold gap-1">
+                        {([
+                            {key: 'ALL', label: `All Firms (${firms.length})`},
+                            {key: 'TRIAL', label: `14-Day Trial (${activeTrialFirms.length})`},
+                            {key: 'TRIAL_EXPIRED', label: `Trial Expired (${expiredTrialFirms.length})`},
+                            {
+                                key: 'UNPAID',
+                                label: `Not Paid Yet • ${selectedBillingMonth} (${unpaidFirmsForSelectedMonth.length})`
+                            },
+                            {
+                                key: 'PAID',
+                                label: `Paid • ${selectedBillingMonth} (${paidFirmsForSelectedMonth.length})`
+                            },
+                            {key: 'PENDING', label: `Pending Approval (${pendingFirms.length})`},
+                            {key: 'ACTIVE', label: `Active (${activeFirms.length})`},
+                            {key: 'SUSPENDED', label: `Access Denied (${suspendedFirms.length})`},
+                        ] as const).map(tab => (
+                            <button
+                                key={tab.key}
+                                onClick={() => setFirmTab(tab.key)}
+                                className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                                    firmTab === tab.key
+                                        ? tab.key === 'UNPAID' || tab.key === 'TRIAL_EXPIRED'
+                                            ? 'bg-rose-600 text-white shadow-xs'
+                                            : tab.key === 'TRIAL'
+                                                ? 'bg-indigo-600 text-white shadow-xs'
                                                 : tab.key === 'PAID'
                                                     ? 'bg-emerald-600 text-white shadow-xs'
                                                     : 'bg-[#2A3642] dark:bg-[#465769] text-white shadow-xs'
-                                            : tab.key === 'UNPAID' && unpaidFirmsForSelectedMonth.length > 0
+                                        : tab.key === 'TRIAL' && activeTrialFirms.length > 0
+                                            ? 'text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30'
+                                            : (tab.key === 'UNPAID' && unpaidFirmsForSelectedMonth.length > 0) ||
+                                            (tab.key === 'TRIAL_EXPIRED' && expiredTrialFirms.length > 0)
                                                 ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
                                                 : 'text-[#465769] dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#2A3642]'
-                                    }`}
-                                >
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </div>
-
-                        {(firmTab !== 'ALL' || firmSearch.trim() !== '' || selectedBillingMonth !== currentMonthKey) && (
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setFirmTab('ALL');
-                                    setFirmSearch('');
-                                    setSelectedBillingMonth(currentMonthKey);
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-[#182028] border border-slate-300 dark:border-[#465769]/70 text-xs font-extrabold text-[#465769] dark:text-slate-200 hover:bg-slate-100 transition cursor-pointer"
+                                }`}
                             >
-                                <RotateCcw size={13} /> Reset Filters
+                                {tab.label}
                             </button>
-                        )}
+                        ))}
                     </div>
                 </div>
 
                 <div className="p-6 sm:p-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                     {filteredFirms.length === 0 ? (
-                        <div className="col-span-full text-center py-12 bg-[#F8FAFC] dark:bg-[#1E2730] rounded-2xl border border-dashed border-slate-200 dark:border-[#465769]/40">
+                        <div
+                            className="col-span-full text-center py-12 bg-[#F8FAFC] dark:bg-[#1E2730] rounded-2xl border border-dashed border-slate-200 dark:border-[#465769]/40">
                             <p className="text-sm font-bold text-[#2A3642] dark:text-white">
                                 {firmTab === 'UNPAID'
                                     ? `All approved law firms have paid for ${selectedBillingMonth}!`

@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword,onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc,updateDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import {
     Scale,
@@ -45,6 +45,29 @@ export default function LoginPage() {
         recaptchaRef.current?.reset();
         setCaptchaVal(null);
     };
+
+    useEffect(() => {
+        const unsub = onAuthStateChanged(auth, async (u) => {
+            if (u && localStorage.getItem('chamber_auth_active') === 'true') {
+                const uDoc = await getDoc(doc(db, 'users', u.uid));
+                const data = uDoc.data();
+                if (!data) return;
+
+                if (data.role === 'SUPER_ADMIN') {
+                    router.replace('/superadmin');
+                } else if (data.isFirstLogin) {
+                    router.replace('/change-password');
+                } else if (!data.pin) {
+                    router.replace('/setup-pin');
+                } else if (sessionStorage.getItem('chamber_pin_verified') === 'true') {
+                    router.replace('/dashboard');
+                } else {
+                    router.replace('/verify-pin');
+                }
+            }
+        });
+        return () => unsub();
+    }, [router]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -110,35 +133,56 @@ export default function LoginPage() {
                     const userData = userDoc.data();
 
                     if (userData.firmId && userData.role !== 'SUPER_ADMIN') {
-                        const firmDoc = await getDoc(doc(db, 'firms', userData.firmId));
+                        const firmRef = doc(db, 'firms', userData.firmId);
+                        const firmDoc = await getDoc(firmRef);
+
                         if (firmDoc.exists()) {
                             const fData = firmDoc.data();
 
                             if (fData.approvalStatus === 'PENDING') {
                                 await auth.signOut();
-                                recaptchaRef.current?.reset();
-                                setCaptchaVal(null);
                                 setError('Your Law Firm registration is still pending Super Admin approval.');
                                 return;
                             }
 
                             if (fData.approvalStatus === 'REJECTED') {
                                 await auth.signOut();
-                                recaptchaRef.current?.reset();
-                                setCaptchaVal(null);
                                 setError('Your Law Firm registration was rejected. Contact Super Admin.');
+                                return;
+                            }
+
+                            // දින 14ක Trial කාලය අවසන් වී ඇත්දැයි පරීක්ෂා කිරීම
+                            const isTrialExpired =
+                                fData.planType === 'TRIAL' &&
+                                fData.trialEndsAt &&
+                                new Date() > new Date(fData.trialEndsAt);
+
+                            if (isTrialExpired) {
+                                if (fData.isActive !== false) {
+                                    await updateDoc(firmRef, {
+                                        isActive: false,
+                                        trialExpiredAt: new Date().toISOString(),
+                                    });
+                                }
+                                await auth.signOut();
+                                localStorage.removeItem('chamber_auth_active');
+                                sessionStorage.removeItem('chamber_pin_verified');
+                                setError('Your 14-day free trial has expired. Please contact Super Admin to activate your subscription.');
                                 return;
                             }
 
                             if (fData.isActive === false) {
                                 await auth.signOut();
-                                recaptchaRef.current?.reset();
-                                setCaptchaVal(null);
+                                localStorage.removeItem('chamber_auth_active');
+                                sessionStorage.removeItem('chamber_pin_verified');
                                 setError("Access Denied: Your Law Firm's system access has been suspended.");
                                 return;
                             }
                         }
                     }
+
+                    localStorage.setItem('chamber_auth_active', 'true');
+                    sessionStorage.removeItem('chamber_pin_verified');
 
                     if (userData.role === 'SUPER_ADMIN') {
                         router.push('/superadmin');
@@ -210,7 +254,7 @@ export default function LoginPage() {
                                 <Scale size={22} className="text-white" />
                             </div>
                             <span className="text-xl font-black tracking-widest">
-                                LAW<span className="text-slate-300">PORTAL</span>
+                                CHAMBER<span className="text-slate-300">CRIPT</span>
                             </span>
                         </Link>
 
@@ -241,7 +285,7 @@ export default function LoginPage() {
                     </div>
 
                     <p className="relative z-10 text-[11px] text-slate-400 font-medium pt-8">
-                        © {currentYear} LawPortal. Protected Chamber Access.
+                        © {currentYear} Chambercript. Protected Chamber Access.
                     </p>
                 </aside>
 
@@ -271,7 +315,7 @@ export default function LoginPage() {
                             <Scale size={26} />
                         </div>
                         <span className="text-lg font-black tracking-widest text-[#232e39] dark:text-white">
-                            LAW<span className="text-slate-500 dark:text-slate-300">PORTAL</span>
+                            CHAMBER<span className="text-slate-500 dark:text-slate-300">CRIPT</span>
                         </span>
                     </div>
 

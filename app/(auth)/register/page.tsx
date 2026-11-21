@@ -75,6 +75,7 @@ export default function RegisterPage() {
                 smsQuota: 100, // Trial quota granted once approved
                 isActive: false, // Locked until Super Admin approves
                 approvalStatus: 'PENDING',
+                planType: 'TRIAL',
                 createdAt: now,
             });
 

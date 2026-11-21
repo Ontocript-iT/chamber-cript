@@ -8,7 +8,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import {
     ArrowLeft, Edit, Save, ChevronDown, ChevronUp, Plus,
     Trash2, Send, MessageSquare, History, Calendar, CalendarClock, FileText, X, Activity, User,
-    MoreVertical, CheckCircle, Clock, AlertTriangle, Settings, Phone, Mail
+    MoreVertical, CheckCircle, Clock, AlertTriangle, Settings, Phone, Mail, Printer, Eye
 } from 'lucide-react';
 
 import { logActivity } from '@/lib/logger';
@@ -41,7 +41,7 @@ const timelineBadgeStyle = (status?: string) => {
     if (status === 'Completed') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300';
     if (status === 'Postponed') return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300';
     if (status === 'Urgent') return 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300';
-    return 'bg-slate-100 text-slate-700 dark:bg-[#1E2730] dark:text-slate-300';
+    return 'bg-blue-50 text-blue-700 border border-blue-200/70 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/50';
 };
 
 const Field = ({ label, value }: { label: string; value?: string }) => (
@@ -102,6 +102,96 @@ export default function AdvancedCaseViewPage(props: PageProps) {
     const [smsFilter, setSmsFilter] = useState('ALL');
     const [smsPage, setSmsPage] = useState(1);
     const SMS_PER_PAGE = 5;
+
+    const [previewDoc, setPreviewDoc] = useState<{ isOpen: boolean; name: string; url: string }>({
+        isOpen: false,
+        name: '',
+        url: '',
+    });
+    const [printingDoc, setPrintingDoc] = useState(false);
+
+    const isImageFile = (url: string, name: string) =>
+        /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(url) ||
+        /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
+
+
+    const handlePrintPreviewDoc = async () => {
+        if (!previewDoc.url) return;
+        setPrintingDoc(true);
+
+        const cleanupIframe = (iframe: HTMLIFrameElement, blobUrl?: string) => {
+            setTimeout(() => {
+                if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                if (blobUrl) URL.revokeObjectURL(blobUrl);
+            }, 60_000);
+        };
+
+        try {
+            // 1. Images: Render inside a same-origin srcdoc iframe (never hits cross-origin SecurityError)
+            if (isImageFile(previewDoc.url, previewDoc.name)) {
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'fixed';
+                iframe.style.width = '0';
+                iframe.style.height = '0';
+                iframe.style.border = '0';
+                iframe.srcdoc = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>${previewDoc.name}</title>
+                    <style>
+                        @page { margin: 12mm; }
+                        body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+                        img { max-width: 100%; max-height: 96vh; object-fit: contain; }
+                    </style>
+                </head>
+                <body>
+                    <img src="${previewDoc.url}" onload="window.focus(); window.print();" />
+                </body>
+                </html>
+            `;
+                document.body.appendChild(iframe);
+                setPrintingDoc(false);
+                cleanupIframe(iframe);
+                return;
+            }
+
+            // 2. PDFs / Other Docs: Fetch via same-origin proxy so it becomes a local Blob URL
+            const proxyUrl = `/api/proxy-file?url=${encodeURIComponent(previewDoc.url)}`;
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error('Failed to load document for printing.');
+
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+
+            const iframe = document.createElement('iframe');
+            iframe.style.position = 'fixed';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = '0';
+            iframe.src = blobUrl;
+
+            iframe.onload = () => {
+                setTimeout(() => {
+                    iframe.contentWindow?.focus();
+                    iframe.contentWindow?.print();
+                    setPrintingDoc(false);
+                    cleanupIframe(iframe, blobUrl);
+                }, 300);
+            };
+
+            document.body.appendChild(iframe);
+        } catch (err: any) {
+            setPrintingDoc(false);
+            setAlertModal({
+                isOpen: true,
+                title: 'Print Error',
+                message: err?.message || 'Unable to print this document directly.',
+                type: 'error',
+            });
+        }
+    };
+
 
     useEffect(() => {
         const fetchData = async (user: any) => {
@@ -558,19 +648,55 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
                                             <label className={labelStyle}>Reference no</label>
-                                            <input type="text" placeholder="Reference No" value={editForm.referenceNo || ''} onChange={e => setEditForm({...editForm, referenceNo: e.target.value})} className={inputStyle} />
+                                            <input type="text" placeholder="Reference No"
+                                                   value={editForm.referenceNo || ''} onChange={e => setEditForm({
+                                                ...editForm,
+                                                referenceNo: e.target.value
+                                            })} className={inputStyle}/>
                                         </div>
                                         <div>
                                             <label className={labelStyle}>Court case no</label>
-                                            <input type="text" placeholder="Court Case No" value={editForm.courtCaseNo || ''} onChange={e => setEditForm({...editForm, courtCaseNo: e.target.value})} className={inputStyle} />
+                                            <input type="text" placeholder="Court Case No"
+                                                   value={editForm.courtCaseNo || ''} onChange={e => setEditForm({
+                                                ...editForm,
+                                                courtCaseNo: e.target.value
+                                            })} className={inputStyle}/>
                                         </div>
                                         <div>
                                             <label className={labelStyle}>Chamber ref</label>
-                                            <input type="text" placeholder="Chamber Ref" value={editForm.chamberRef} onChange={e => setEditForm({...editForm, chamberRef: e.target.value})} className={inputStyle} />
+                                            <input type="text" placeholder="Chamber Ref" value={editForm.chamberRef}
+                                                   onChange={e => setEditForm({
+                                                       ...editForm,
+                                                       chamberRef: e.target.value
+                                                   })} className={inputStyle}/>
                                         </div>
                                         <div>
                                             <label className={labelStyle}>Case type</label>
-                                            <input type="text" placeholder="Case Type" value={editForm.type} onChange={e => setEditForm({...editForm, type: e.target.value})} className={inputStyle} />
+                                            <select
+                                                value={editForm.type || ''}
+                                                onChange={e => setEditForm({...editForm, type: e.target.value})}
+                                                className={`${inputStyle} cursor-pointer`}
+                                            >
+                                                <option value="">Select Case Type *</option>
+                                                <option value="Civil">Civil</option>
+                                                <option value="Criminal">Criminal</option>
+                                                <option value="Commercial">Commercial</option>
+                                                <option value="Family">Family</option>
+                                                <option value="Other">Add New...</option>
+                                            </select>
+                                            {editForm.type === 'Other' && (
+                                                <input
+                                                    type="text"
+                                                    placeholder="Specify Case Type"
+                                                    value={editForm.customType || ''}
+                                                    onChange={e => setEditForm({
+                                                        ...editForm,
+                                                        customType: e.target.value
+                                                    })}
+                                                    className={`${inputStyle} mt-2`}
+                                                    required
+                                                />
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -704,20 +830,35 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                 </div>
 
                                 <div className="pt-5 border-t border-slate-200/80 dark:border-[#465769]/30">
-                                    <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3">Documents
-                                        ({docCount})</h3>
+                                    <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3">
+                                        Documents ({docCount})
+                                    </h3>
                                     {docCount === 0 ? (
-                                        <p className="text-xs text-slate-400">No documents
-                                            attached.{userPerms.write ? ' Use Edit case to add some.' : ''}</p>
+                                        <p className="text-xs text-slate-400">
+                                            No documents attached.{userPerms.write ? ' Use Edit case to add some.' : ''}
+                                        </p>
                                     ) : (
                                         <div className="space-y-2">
                                             {caseData.documents?.map((d: any, i: number) => (
-                                                <a key={i} href={d.url} target="_blank" rel="noreferrer"
-                                                   className="flex items-center gap-3 text-sm font-medium bg-[#F8FAFC] dark:bg-[#1E2730] text-[#2A3642] dark:text-slate-200 px-4 py-3 rounded-xl border border-slate-200 dark:border-[#465769]/50 hover:border-[#465769] dark:hover:border-slate-400 transition">
-                                                    <FileText size={16}
-                                                              className="text-[#465769] dark:text-slate-400 shrink-0"/>
-                                                    <span className="truncate">{d.name}</span>
-                                                </a>
+                                                <div
+                                                    key={i}
+                                                    onClick={() => setPreviewDoc({
+                                                        isOpen: true,
+                                                        name: d.name || `Document ${i + 1}`,
+                                                        url: d.url
+                                                    })}
+                                                    className="flex items-center justify-between gap-3 text-sm font-medium bg-[#F8FAFC] dark:bg-[#1E2730] text-[#2A3642] dark:text-slate-200 px-4 py-3 rounded-xl border border-slate-200 dark:border-[#465769]/50 hover:border-[#465769] dark:hover:border-slate-400 transition cursor-pointer group"
+                                                >
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <FileText size={16}
+                                                                  className="text-[#465769] dark:text-slate-400 shrink-0"/>
+                                                        <span className="truncate">{d.name}</span>
+                                                    </div>
+                                                    <span
+                                                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#465769] dark:text-slate-300 group-hover:text-[#2A3642] dark:group-hover:text-white shrink-0">
+                        <Eye size={14}/> Preview &amp; Print
+                    </span>
+                                                </div>
                                             ))}
                                         </div>
                                     )}
@@ -736,9 +877,11 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                 onClick={() => setActiveTab('timeline')}
                                 className={`relative flex items-center gap-2 px-4 py-4 text-sm font-semibold transition cursor-pointer ${activeTab === 'timeline' ? 'text-[#2A3642] dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-[#2A3642] dark:hover:text-white'}`}
                             >
-                                <Activity size={17} /> Timeline
-                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#1E2730] text-[#465769] dark:text-slate-300">{timeline.length}</span>
-                                {activeTab === 'timeline' && <span className="absolute left-3 right-3 -bottom-px h-0.5 bg-[#2A3642] dark:bg-slate-200 rounded-full" />}
+                                <Activity size={17}/> Timeline
+                                <span
+                                    className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#1E2730] text-[#465769] dark:text-slate-300">{timeline.length}</span>
+                                {activeTab === 'timeline' && <span
+                                    className="absolute left-3 right-3 -bottom-px h-0.5 bg-[#2A3642] dark:bg-slate-200 rounded-full"/>}
                             </button>
                             <button
                                 role="tab" aria-selected={activeTab === 'sms'}
@@ -823,21 +966,25 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                     <div className="flex justify-between items-start gap-3">
                                                         <div className="min-w-0">
                                                             <div className="flex flex-wrap items-center gap-2">
-                                                                <span className="text-sm font-bold text-[#2A3642] dark:text-white">
-                                                                    {item.type === 'Custom/Other' ? item.customType : item.type}
-                                                                </span>
-                                                                {item.status && item.status !== 'Pending' && (
-                                                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${timelineBadgeStyle(item.status)}`}>{item.status}</span>
-                                                                )}
+    <span className="text-sm font-bold text-[#2A3642] dark:text-white">
+        {item.type === 'Custom/Other' ? item.customType : item.type}
+    </span>
+                                                                <span
+                                                                    className={`text-xs font-semibold px-2 py-0.5 rounded-md ${timelineBadgeStyle(item.status || 'Pending')}`}>
+        {item.status || 'Pending'}
+    </span>
                                                             </div>
                                                             <p className="text-xs font-medium text-[#465769] dark:text-slate-400 mt-1 flex items-center gap-1.5">
-                                                                <Calendar size={13} /> {new Date(item.date).toDateString()}
+                                                                <Calendar
+                                                                    size={13}/> {new Date(item.date).toDateString()}
                                                             </p>
                                                         </div>
 
                                                         {(userPerms.write || userPerms.sms) && (
                                                             <div className="relative shrink-0">
-                                                                <button onClick={() => setActiveDropdown(activeDropdown === item.id ? null : item.id)} aria-label="Actions" className="text-slate-400 hover:text-[#2A3642] dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-[#354453] transition cursor-pointer"><MoreVertical size={18}/></button>
+                                                                <button
+                                                                    onClick={() => setActiveDropdown(activeDropdown === item.id ? null : item.id)}
+                                                                    aria-label="Actions" className="text-slate-400 hover:text-[#2A3642] dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-[#354453] transition cursor-pointer"><MoreVertical size={18}/></button>
 
                                                                 {activeDropdown === item.id && (
                                                                     <>
@@ -849,6 +996,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                                             {userPerms.write && (
                                                                                 <>
                                                                                     <div className="h-px bg-slate-100 dark:bg-[#465769]/40"></div>
+                                                                                    <button onClick={() => updateTimelineStatus(item.id, 'Pending')} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-[#1E2730] flex items-center gap-3 text-slate-600 dark:text-slate-300 cursor-pointer transition"><Clock size={15} /> Mark pending</button>
                                                                                     <button onClick={() => updateTimelineStatus(item.id, 'Completed')} className="w-full text-left px-4 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-3 text-emerald-700 dark:text-emerald-300 cursor-pointer transition"><CheckCircle size={15} /> Mark complete</button>
                                                                                     <button onClick={() => updateTimelineStatus(item.id, 'Postponed')} className="w-full text-left px-4 py-3 hover:bg-amber-50 dark:hover:bg-amber-950/40 flex items-center gap-3 text-amber-700 dark:text-amber-300 cursor-pointer transition"><Clock size={15} /> Postpone</button>
                                                                                     <button onClick={() => updateTimelineStatus(item.id, 'Urgent')} className="w-full text-left px-4 py-3 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-3 text-rose-700 dark:text-rose-300 cursor-pointer transition"><AlertTriangle size={15} /> Mark urgent</button>
@@ -1026,7 +1174,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
 
             {/* ================= ALERT MODAL ================= */}
             {alertModal.isOpen && (
-                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#2A3642]/75 backdrop-blur-xs p-4">
+                <div className="fixed inset-0 z-[999] flex items-center justify-center bg-[#2A3642]/75 backdrop-blur-xs p-4">
                     <div className="bg-white dark:bg-[#2A3642] rounded-2xl p-6 sm:p-7 w-full max-w-sm shadow-2xl border border-slate-200 dark:border-[#465769] text-center animate-in fade-in zoom-in duration-200">
                         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 ${
                             alertModal.type === 'error' ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400' :
@@ -1038,6 +1186,59 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                         <h3 className="text-lg font-bold text-[#2A3642] dark:text-white mb-2">{alertModal.title}</h3>
                         <p className="text-sm text-[#465769] dark:text-slate-300 mb-7">{alertModal.message}</p>
                         <button onClick={() => setAlertModal({ isOpen: false, message: '' })} className={`${primaryBtn} w-full`}>OK</button>
+                    </div>
+                </div>
+            )}
+            {/* ================= DOCUMENT PREVIEW & PRINT MODAL ================= */}
+            {previewDoc.isOpen && (
+                <div className="fixed mt-14 inset-0 z-[140] flex items-center justify-center bg-[#2A3642]/80 backdrop-blur-xs p-3 sm:p-6">
+                    <div className="bg-white dark:bg-[#2A3642] rounded-2xl w-full max-w-4xl h-[88vh] flex flex-col shadow-2xl border border-slate-200 dark:border-[#465769] overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="px-5 py-4 bg-[#F8FAFC] dark:bg-[#222C36] border-b border-slate-200/80 dark:border-[#465769]/50 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <FileText size={18} className="text-[#465769] dark:text-slate-300 shrink-0" />
+                                <h3 className="text-sm sm:text-base font-bold text-[#2A3642] dark:text-white truncate">
+                                    {previewDoc.name}
+                                </h3>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={handlePrintPreviewDoc}
+                                    disabled={printingDoc}
+                                    className={primaryBtn}
+                                >
+                                    <Printer size={15} />
+                                    {printingDoc ? 'Preparing...' : 'Print Document'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPreviewDoc({ isOpen: false, name: '', url: '' })}
+                                    aria-label="Close preview"
+                                    className="p-2 rounded-lg text-slate-500 hover:text-[#2A3642] dark:text-slate-300 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-[#354453] transition cursor-pointer"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Document Viewer Body */}
+                        <div className="flex-1 bg-slate-100 dark:bg-[#182028] overflow-auto flex items-center justify-center p-3 sm:p-5">
+                            {isImageFile(previewDoc.url, previewDoc.name) ? (
+                                <img
+                                    src={previewDoc.url}
+                                    alt={previewDoc.name}
+                                    className="max-w-full max-h-full object-contain rounded-lg shadow-md bg-white"
+                                />
+                            ) : (
+                                <iframe
+                                    src={previewDoc.url}
+                                    title={previewDoc.name}
+                                    className="w-full h-full rounded-lg border border-slate-200 dark:border-[#465769]/40 bg-white"
+                                />
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

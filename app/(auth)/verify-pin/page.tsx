@@ -32,7 +32,16 @@ export default function VerifyPinPage() {
     useEffect(() => {
         setCurrentYear(new Date().getFullYear());
         const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (!user) router.push('/login');
+            if (!user) {
+                localStorage.removeItem('chamber_auth_active');
+                sessionStorage.removeItem('chamber_pin_verified');
+                router.push('/login');
+                return;
+            }
+            // මෙම tab එකේ දැනටමත් PIN එක verify කර ඇත්නම් dashboard වෙත යවන්න
+            if (sessionStorage.getItem('chamber_pin_verified') === 'true') {
+                router.replace('/dashboard');
+            }
         });
         return () => unsubscribe();
     }, [router]);
@@ -59,6 +68,8 @@ export default function VerifyPinPage() {
             const dbPin = userDoc.data()?.pin;
 
             if (dbPin === pinToVerify) {
+                localStorage.setItem('chamber_auth_active', 'true');
+                sessionStorage.setItem('chamber_pin_verified', 'true');
                 router.push('/dashboard');
             } else {
                 setError('Incorrect PIN. Please check your 6-digit code and try again.');
@@ -144,6 +155,8 @@ export default function VerifyPinPage() {
     };
 
     const handleSwitchAccount = async () => {
+        localStorage.removeItem('chamber_auth_active');
+        sessionStorage.removeItem('chamber_pin_verified');
         await signOut(auth);
         router.push('/login');
     };

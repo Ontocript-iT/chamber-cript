@@ -46,36 +46,94 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
             if (!user) {
-                router.push('/login');
-            } else {
-                try {
-                    const userDoc = await getDoc(doc(db, 'users', user.uid));
-                    if (userDoc.exists()) {
-                        const uData: any = { uid: user.uid, ...userDoc.data() };
-                        setActiveUser(uData);
+                localStorage.removeItem('chamber_auth_active');
+                sessionStorage.removeItem('chamber_pin_verified');
+                router.replace('/login');
+                return;
+            }
 
-                        if (uData.role === 'LAWYER' || uData.permissions?.includes('cases.read')) {
-                            setHasSearchAccess(true);
-                        }
-
-                        if (uData.firmId && uData.role !== 'SUPER_ADMIN') {
-                            firmUnsub = onSnapshot(doc(db, 'firms', uData.firmId), (firmSnap) => {
-                                if (firmSnap.exists()) setFirmData(firmSnap.data());
-                            });
-
-                            const qTasks = query(collection(db, 'tasks'), where('assigneeId', '==', user.uid));
-                            unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
-                                const tasks = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MyTask));
-                                tasks.sort((a, b) => new Date(b.dueDate || '9999').getTime() - new Date(a.dueDate || '9999').getTime());
-                                setMyTasks(tasks);
-                            });
-                        }
-                    }
-                } catch (error) {
-                    console.error("Error fetching user", error);
-                } finally {
-                    setLoading(false);
+            try {
+                const userDoc = await getDoc(doc(db, 'users', user.uid));
+                if (!userDoc.exists()) {
+                    router.replace('/login');
+                    return;
                 }
+
+                const uData: any = { uid: user.uid, ...userDoc.data() };
+
+                // 1. මුරපදය වෙනස් කිරීම, PIN සැකසීම සහ PIN තහවුරු කිරීම පරීක්ෂා කිරීම
+                if (uData.role !== 'SUPER_ADMIN') {
+                    if (uData.isFirstLogin) {
+                        router.replace('/change-password');
+                        return;
+                    }
+                    if (!uData.pin) {
+                        router.replace('/setup-pin');
+                        return;
+                    }
+                    // බ්‍රවුසරය වසා නැවත පැමිණි විට නැවත PIN screen එකට යොමු කිරීම
+                    if (sessionStorage.getItem('chamber_pin_verified') !== 'true') {
+                        router.replace('/verify-pin');
+                        return;
+                    }
+                }
+
+                // 2. Law Firm තත්ත්වය සහ දින 14 Trial කාලය අවසන් වී ඇත්දැයි පරීක්ෂා කිරීම
+                if (uData.firmId && uData.role !== 'SUPER_ADMIN') {
+                    const firmRef = doc(db, 'firms', uData.firmId);
+                    const initialFirmSnap = await getDoc(firmRef);
+
+                    if (initialFirmSnap.exists()) {
+                        const fData = initialFirmSnap.data();
+                        const isTrialExpired =
+                            fData.planType === 'TRIAL' &&
+                            fData.trialEndsAt &&
+                            new Date() > new Date(fData.trialEndsAt);
+
+                        if (isTrialExpired && fData.isActive !== false) {
+                            await updateDoc(firmRef, {
+                                isActive: false,
+                                trialExpiredAt: new Date().toISOString(),
+                            });
+                            fData.isActive = false;
+                        }
+                        setFirmData(fData);
+                    }
+
+                    firmUnsub = onSnapshot(firmRef, async (firmSnap) => {
+                        if (!firmSnap.exists()) return;
+                        const liveFirm = firmSnap.data();
+                        const expiredNow =
+                            liveFirm.planType === 'TRIAL' &&
+                            liveFirm.trialEndsAt &&
+                            new Date() > new Date(liveFirm.trialEndsAt);
+
+                        if (expiredNow && liveFirm.isActive !== false) {
+                            await updateDoc(firmRef, {
+                                isActive: false,
+                                trialExpiredAt: new Date().toISOString(),
+                            });
+                            return;
+                        }
+                        setFirmData(liveFirm);
+                    });
+
+                    const qTasks = query(collection(db, 'tasks'), where('assigneeId', '==', user.uid));
+                    unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
+                        const tasks = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MyTask));
+                        tasks.sort((a, b) => new Date(b.dueDate || '9999').getTime() - new Date(a.dueDate || '9999').getTime());
+                        setMyTasks(tasks);
+                    });
+                }
+
+                setActiveUser(uData);
+                if (uData.role === 'LAWYER' || uData.permissions?.includes('cases.read')) {
+                    setHasSearchAccess(true);
+                }
+                setLoading(false);
+            } catch (error) {
+                console.error("Error fetching user", error);
+                setLoading(false);
             }
         });
 
@@ -85,6 +143,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
             if (unsubscribeTasks) unsubscribeTasks();
         };
     }, [router]);
+
 
     useEffect(() => {
         const fetchSearchData = async () => {
@@ -115,7 +174,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         return () => clearTimeout(delayDebounceFn);
     }, [searchQuery, activeUser?.firmId, hasSearchAccess]);
 
-    const handleLogout = async () => { await signOut(auth); router.push('/login'); };
+    const handleLogout = async () => {
+        localStorage.removeItem('chamber_auth_active');
+        sessionStorage.removeItem('chamber_pin_verified');
+        await signOut(auth);
+        router.replace('/login');
+    };
     const updateMyTaskStatus = async (taskId: string, newStatus: string) => {
         try { await updateDoc(doc(db, 'tasks', taskId), { status: newStatus }); } catch (err) { alert("Failed to update task."); }
     };
@@ -128,8 +192,14 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     const completedTasks = myTasks.filter(t => t.status === 'Completed');
     const displayTasks = taskView === 'PENDING' ? pendingTasks : completedTasks;
 
+    const isTrialExpired =
+        !isSuperAdmin &&
+        firmData?.planType === 'TRIAL' &&
+        firmData?.trialEndsAt &&
+        new Date() > new Date(firmData.trialEndsAt);
+
     const isFirmPending = !isSuperAdmin && firmData && firmData.approvalStatus === 'PENDING';
-    const isFirmSuspended = !isSuperAdmin && firmData && (firmData.isActive === false || firmData.approvalStatus === 'REJECTED');
+    const isFirmSuspended = !isSuperAdmin && firmData && (firmData.isActive === false || firmData.approvalStatus === 'REJECTED' || isTrialExpired);
 
     if (isFirmPending) {
         return (
@@ -150,9 +220,13 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         return (
             <div className="flex flex-col items-center justify-center h-screen bg-background text-center p-6">
                 <ShieldAlert size={64} className="text-red-500 mb-4" />
-                <h1 className="text-3xl font-black mb-2">System Access Denied</h1>
+                <h1 className="text-3xl font-black mb-2">
+                    {isTrialExpired ? '14-Day Free Trial Expired' : 'System Access Denied'}
+                </h1>
                 <p className="text-gray-500 max-w-md">
-                    Access for your Law Firm and all team members has been suspended due to pending monthly payments or administrative restrictions. Please contact the Super Admin.
+                    {isTrialExpired
+                        ? 'Your 14-day free trial period has ended. Please contact the Super Admin to activate your subscription.'
+                        : 'Access for your Law Firm and all team members has been suspended due to pending monthly payments or administrative restrictions. Please contact the Super Admin.'}
                 </p>
                 <button onClick={handleLogout} className="mt-6 px-6 py-2.5 bg-brand-dark text-white rounded-xl font-bold cursor-pointer">
                     Logout
@@ -189,7 +263,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                             <div className="w-10 h-10 bg-brand text-white rounded-xl flex items-center justify-center shadow-sm">
                                 <Scale size={20} />
                             </div>
-                            <span className="text-xl font-extrabold tracking-widest text-brand-dark dark:text-white hidden sm:block">LAW<span className="text-brand">PORTAL</span></span>
+                            <span className="text-xl font-extrabold tracking-widest text-brand-dark dark:text-white hidden sm:block">Chamber<span className="text-brand">Cript</span></span>
                         </div>
 
                         {/* Middle Navigation & Search Bar */}

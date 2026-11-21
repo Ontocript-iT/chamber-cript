@@ -6,7 +6,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-    title: "LawPortal - Legal Practice Management System",
+    title: "Chambercript - Legal Practice Management System",
     description: "Secure and efficient case, task, and staff management for modern law firms.",
 };
 

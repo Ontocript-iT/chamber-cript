@@ -14,7 +14,8 @@ import { logActivity } from '@/lib/logger';
 type Task = {
     id: string; firmId: string; assigneeId: string; assigneeName: string;
     assignerId: string; assignerName: string; caseId: string; caseTitle: string;
-    note: string; priority: 'Normal' | 'Urgent'; status: 'Pending' | 'In Progress' | 'Completed';
+    note: string; progressNote?: string; progressUpdatedBy?: string; progressUpdatedAt?: string;
+    priority: 'Normal' | 'Urgent'; status: 'Pending' | 'In Progress' | 'Completed';
     dueDate: string; createdAt: string;
 };
 
@@ -27,6 +28,10 @@ export default function TaskManagementPage() {
     const [loading, setLoading] = useState(true);
     const [activeUser, setActiveUser] = useState<any>(null);
     const [hasWritePerm, setHasWritePerm] = useState(false);
+
+    const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+    const [editingNoteTaskId, setEditingNoteTaskId] = useState<string | null>(null);
+    const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
 
     const [members, setMembers] = useState<Member[]>([]);
     const [cases, setCases] = useState<CaseMin[]>([]);
@@ -87,7 +92,29 @@ export default function TaskManagementPage() {
         return () => unsub();
     }, [router]);
 
-    // --- Delegate Task Logic ---
+
+    const handleSaveTaskNote = async (task: Task) => {
+        const canEditNote = activeUser?.role === 'LAWYER' || task.assigneeId === activeUser?.uid;
+        if (!canEditNote) return alert("Permission denied.");
+
+        const updatedNote = (noteDrafts[task.id] ?? task.progressNote ?? '').trim();
+        setSavingNoteId(task.id);
+        try {
+            const meta = {
+                progressNote: updatedNote,
+                progressUpdatedBy: activeUser.name,
+                progressUpdatedAt: new Date().toISOString(),
+            };
+            await updateDoc(doc(db, 'tasks', task.id), meta);
+            setTasks(tasks.map(t => (t.id === task.id ? { ...t, ...meta } : t)));
+            setEditingNoteTaskId(null);
+        } catch (err) {
+            alert("Failed to save note.");
+        } finally {
+            setSavingNoteId(null);
+        }
+    };
+
     const handleDelegate = async () => {
         if (!form.assigneeId || !form.note) return alert("Assignee and Note are required.");
         setIsSubmitting(true);
@@ -260,6 +287,8 @@ export default function TaskManagementPage() {
                     ) : displayTasks.map(task => {
 
                         const canUpdateStatus = activeUser?.role === 'LAWYER' || task.assigneeId === activeUser?.uid || task.assignerId === activeUser?.uid;
+                        const canAccessTaskNote = activeUser?.role === 'LAWYER' || task.assigneeId === activeUser?.uid;
+                        const isEditingThisNote = editingNoteTaskId === task.id;
 
                         return (
                             <div key={task.id} className="p-5 sm:p-6 border border-slate-200/90 dark:border-[#465769]/40 rounded-3xl bg-[#F8FAFC] dark:bg-[#1E2730] shadow-2xs hover:border-[#465769] transition-all flex flex-col relative overflow-hidden group">
@@ -300,6 +329,70 @@ export default function TaskManagementPage() {
                                     <p className={`text-sm sm:text-base text-[#2A3642] dark:text-slate-100 whitespace-pre-wrap ${task.status === 'Completed' ? 'line-through opacity-70' : 'font-medium'}`}>
                                         {task.note}
                                     </p>
+                                    {/* Private Task Note (Visible & Editable ONLY by Assignee and Admin Lawyer) */}
+                                    {canAccessTaskNote && (
+                                        <div className="mb-4 p-3 rounded-2xl bg-white dark:bg-[#2A3642] border border-slate-200/90 dark:border-[#465769]/50 space-y-2">
+                                            <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-[#465769] dark:text-slate-300">
+                Work Note
+            </span>
+                                                {!isEditingThisNote && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setNoteDrafts(prev => ({ ...prev, [task.id]: task.progressNote || '' }));
+                                                            setEditingNoteTaskId(task.id);
+                                                        }}
+                                                        className="text-[11px] font-extrabold text-[#2A3642] dark:text-slate-200 hover:underline cursor-pointer"
+                                                    >
+                                                        {task.progressNote ? 'Edit Note' : '+ Add Note'}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {isEditingThisNote ? (
+                                                <div className="space-y-2">
+                <textarea
+                    rows={2}
+                    value={noteDrafts[task.id] ?? ''}
+                    onChange={e => setNoteDrafts(prev => ({ ...prev, [task.id]: e.target.value }))}
+                    placeholder="Add progress update or remarks..."
+                    className="w-full px-3 py-2 bg-[#F8FAFC] dark:bg-[#1E2730] border border-slate-200 dark:border-[#465769]/50 rounded-xl text-xs font-medium text-[#2A3642] dark:text-white outline-none resize-none"
+                />
+                                                    <div className="flex justify-end gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setEditingNoteTaskId(null)}
+                                                            className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#1E2730] text-[#465769] dark:text-slate-300 text-[11px] font-bold cursor-pointer"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={savingNoteId === task.id}
+                                                            onClick={() => handleSaveTaskNote(task)}
+                                                            className="px-3.5 py-1.5 rounded-lg bg-[#2A3642] hover:bg-[#465769] dark:bg-[#465769] text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                                                        >
+                                                            {savingNoteId === task.id ? 'Saving...' : 'Save Note'}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : task.progressNote ? (
+                                                <div>
+                                                    <p className="text-xs text-[#2A3642] dark:text-slate-200 whitespace-pre-wrap">
+                                                        {task.progressNote}
+                                                    </p>
+                                                    {task.progressUpdatedBy && (
+                                                        <p className="text-[10px] text-slate-400 mt-1">
+                                                            Updated by {task.progressUpdatedBy}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <p className="text-[11px] text-slate-400 italic">No notes added yet.</p>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="mt-auto pt-4 border-t border-slate-200/80 dark:border-[#465769]/40 space-y-3.5">
