@@ -1423,7 +1423,7 @@ export default function SuperAdminPage() {
                         </div>
 
                         {/* Drawer Content */}
-                        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                        <div className="flex-1 overflow-y-auto p-6 mt space-y-6">
 
                             {/* TAB 1: OVERVIEW & CASE STATS */}
                             {drawerTab === 'OVERVIEW' && (

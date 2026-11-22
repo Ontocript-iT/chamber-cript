@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { useTheme } from 'next-themes';
 
+
 type MyTask = {
     id: string; caseTitle: string; note: string; priority: string; status: string; dueDate: string; assignerName: string;
 };
@@ -116,14 +117,31 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                             return;
                         }
                         setFirmData(liveFirm);
-                    });
+                    },(error) => {
+                            if (error.code !== 'permission-denied') {
+                                console.error("Firm Listener Error:", error);
+                            }
+                        }
+                    );
 
-                    const qTasks = query(collection(db, 'tasks'), where('assigneeId', '==', user.uid));
-                    unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
-                        const tasks = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MyTask));
-                        tasks.sort((a, b) => new Date(b.dueDate || '9999').getTime() - new Date(a.dueDate || '9999').getTime());
-                        setMyTasks(tasks);
-                    });
+                    const qTasks = query(
+                        collection(db, 'tasks'),
+                        where('firmId', '==', uData.firmId),
+                        where('assigneeId', '==', user.uid)
+                    );
+                    unsubscribeTasks = onSnapshot(
+                        qTasks,
+                        (snapshot) => {
+                            const tasks = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MyTask));
+                            tasks.sort((a, b) => new Date(b.dueDate || '9999').getTime() - new Date(a.dueDate || '9999').getTime());
+                            setMyTasks(tasks);
+                        },
+                        (error) => {
+                            if (error.code !== 'permission-denied') {
+                                console.error("Tasks Listener Error:", error);
+                            }
+                        }
+                    );
                 }
 
                 setActiveUser(uData);
@@ -271,15 +289,79 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                             <nav className="hidden lg:flex items-center space-x-1">
                                 {!isSuperAdmin ? (
                                     <>
-                                        <Link href="/dashboard" className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${pathname === '/dashboard' ? 'bg-brand/10 text-brand dark:text-brand-light' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-brand/20'}`}><Home size={18} /> Dashboard</Link>
-                                        <Link href="/cases" className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${pathname.includes('/cases') ? 'bg-brand/10 text-brand dark:text-brand-light' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-brand/20'}`}><Briefcase size={18} /> Cases</Link>
-                                        <Link href="/tasks" className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${pathname === '/tasks' ? 'bg-brand/10 text-brand dark:text-brand-light' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-brand/20'}`}><CheckCircle size={18} /> Tasks</Link>
+                                        <Link
+                                            href="/dashboard"
+                                            aria-current={pathname === '/dashboard' ? 'page' : undefined}
+                                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${
+                                                pathname === '/dashboard'
+                                                    ? 'bg-[#2A3642] text-white shadow-sm ring-1 ring-[#2A3642] dark:bg-[#465769] dark:text-white dark:ring-slate-300/30'
+                                                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-brand/20 hover:text-[#2A3642] dark:hover:text-white'
+                                            }`}
+                                        >
+                                            <Home size={18} /> Dashboard
+                                        </Link>
+
+                                        <Link
+                                            href="/cases"
+                                            aria-current={pathname.startsWith('/cases') ? 'page' : undefined}
+                                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${
+                                                pathname.startsWith('/cases')
+                                                    ? 'bg-[#2A3642] text-white shadow-sm ring-1 ring-[#2A3642] dark:bg-[#465769] dark:text-white dark:ring-slate-300/30'
+                                                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-brand/20 hover:text-[#2A3642] dark:hover:text-white'
+                                            }`}
+                                        >
+                                            <Briefcase size={18} /> Cases
+                                        </Link>
+
+                                        <Link
+                                            href="/tasks"
+                                            aria-current={pathname.startsWith('/tasks') ? 'page' : undefined}
+                                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${
+                                                pathname.startsWith('/tasks')
+                                                    ? 'bg-[#2A3642] text-white shadow-sm ring-1 ring-[#2A3642] dark:bg-[#465769] dark:text-white dark:ring-slate-300/30'
+                                                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-brand/20 hover:text-[#2A3642] dark:hover:text-white'
+                                            }`}
+                                        >
+                                            <CheckCircle size={18} /> Tasks
+                                        </Link>
 
                                         {activeUser?.role === 'LAWYER' && (
                                             <>
-                                                <Link href="/staff" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-brand/20"><Users size={18} /> Staff</Link>
-                                                <Link href="/logs" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-brand/20"><Activity size={18} /> Logs</Link>
-                                                <Link href="/sms" className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${pathname === '/sms' ? 'bg-brand/10 text-brand dark:text-brand-light' : 'text-brand hover:bg-brand/10'}`}><MessageSquare size={18} /> SMS</Link>
+                                                <Link
+                                                    href="/staff"
+                                                    aria-current={pathname.startsWith('/staff') ? 'page' : undefined}
+                                                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${
+                                                        pathname.startsWith('/staff')
+                                                            ? 'bg-[#2A3642] text-white shadow-sm ring-1 ring-[#2A3642] dark:bg-[#465769] dark:text-white dark:ring-slate-300/30'
+                                                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-brand/20 hover:text-[#2A3642] dark:hover:text-white'
+                                                    }`}
+                                                >
+                                                    <Users size={18} /> Staff
+                                                </Link>
+
+                                                <Link
+                                                    href="/logs"
+                                                    aria-current={pathname.startsWith('/logs') ? 'page' : undefined}
+                                                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${
+                                                        pathname.startsWith('/logs')
+                                                            ? 'bg-[#2A3642] text-white shadow-sm ring-1 ring-[#2A3642] dark:bg-[#465769] dark:text-white dark:ring-slate-300/30'
+                                                            : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-brand/20 hover:text-[#2A3642] dark:hover:text-white'
+                                                    }`}
+                                                >
+                                                    <Activity size={18} /> Logs
+                                                </Link>
+
+                                                <Link
+                                                    href="/sms"
+                                                    aria-current={pathname.startsWith('/sms') ? 'page' : undefined}
+                                                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold transition-all ${
+                                                        pathname.startsWith('/sms')
+                                                            ? 'bg-[#2A3642] text-white shadow-sm ring-1 ring-[#2A3642] dark:bg-[#465769] dark:text-white dark:ring-slate-300/30'
+                                                            : 'text-brand dark:text-brand-light hover:bg-brand/10'
+                                                    }`}
+                                                >
+                                                    <MessageSquare size={18} /> SMS
+                                                </Link>
                                             </>
                                         )}
                                     </>
@@ -415,7 +497,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
                 )}
             </header>
 
-            <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8 relative z-10">
+            <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8 relative">
                 {children}
             </main>
 
