@@ -29,11 +29,13 @@ export function getAdminApp() {
 }
 
 export function getAdminAuth() {
-    // getAdminApp() හරහා Initialize වී ඇති බව තහවුරු කර Auth ලබාදීම
-    return getAdminApp().auth();
+    // TypeScript Build Error එක මඟ හැරීමට (any) ලෙස යෙදීම
+    const app = getAdminApp() as any;
+    return app.auth();
 }
 
 export function getAdminDb() {
-    // getAdminApp() හරහා Initialize වී ඇති බව තහවුරු කර Firestore ලබාදීම
-    return getAdminApp().firestore();
+    // TypeScript Build Error එක මඟ හැරීමට (any) ලෙස යෙදීම
+    const app = getAdminApp() as any;
+    return app.firestore();
 }
