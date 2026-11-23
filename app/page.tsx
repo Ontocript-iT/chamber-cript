@@ -51,13 +51,16 @@ export default function HomePage() {
   ];
 
   return (
-      <div className="min-h-screen flex flex-col bg-slate-100 dark:bg-[#141b22] text-[#232e39] dark:text-slate-100 transition-colors">
+      <div
+          className="min-h-screen flex flex-col bg-slate-100 dark:bg-[#141b22] text-[#232e39] dark:text-slate-100 transition-colors">
         {/* Navigation Bar */}
-        <header className="sticky top-0 z-30 w-full bg-white/90 dark:bg-[#232e39]/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-700/60">
+        <header
+            className="sticky top-0 z-30 w-full bg-white/90 dark:bg-[#232e39]/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-700/60">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 h-18 flex justify-between items-center">
             <Link href="/" className="flex items-center gap-3 group">
-              <div className="w-10 h-10 rounded-xl bg-[#232e39] dark:bg-[#3e5063] text-white flex items-center justify-center shadow-sm group-hover:scale-[1.02] transition">
-                <Scale size={20} />
+              <div
+                  className="w-10 h-10 rounded-xl bg-[#232e39] dark:bg-[#3e5063] text-white flex items-center justify-center shadow-sm group-hover:scale-[1.02] transition">
+                <Scale size={20}/>
               </div>
               <span className="text-lg sm:text-xl font-black tracking-tight text-[#232e39] dark:text-white">
               Chamber<span className="text-slate-500 dark:text-slate-300">Cript</span>
@@ -86,7 +89,8 @@ export default function HomePage() {
           {/* Hero Section */}
           <section className="relative overflow-hidden pt-16 pb-20 sm:pt-24 sm:pb-28 px-4 sm:px-6">
             <div className="max-w-5xl mx-auto">
-              <div className="bg-white dark:bg-[#232e39] rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-700/60 p-8 sm:p-12 lg:p-16 relative overflow-hidden">
+              <div
+                  className="bg-white dark:bg-[#232e39] rounded-3xl shadow-2xl border border-slate-200/90 dark:border-slate-700/60 p-8 sm:p-12 lg:p-16 relative overflow-hidden">
                 <Scale
                     size={320}
                     className="hidden sm:block absolute -right-16 -bottom-16 text-[#232e39] dark:text-white opacity-[0.03] pointer-events-none"
@@ -94,8 +98,9 @@ export default function HomePage() {
                 />
 
                 <div className="relative z-10 max-w-3xl mx-auto text-center">
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 dark:bg-[#182028] border border-slate-200 dark:border-slate-700/70 text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-6">
-                    <Lock size={13} />
+                  <div
+                      className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 dark:bg-[#182028] border border-slate-200 dark:border-slate-700/70 text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-6">
+                    <Lock size={13}/>
                     Chamber &amp; Practice Operations Platform
                   </div>
 
@@ -117,7 +122,7 @@ export default function HomePage() {
                         className="w-full sm:w-auto px-7 py-4 bg-[#232e39] hover:bg-[#334252] dark:bg-[#3e5063] dark:hover:bg-[#4c6178] text-white text-sm sm:text-base font-bold rounded-xl transition shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2"
                     >
                       Start Your Firm
-                      <Briefcase size={18} />
+                      <Briefcase size={18}/>
                     </Link>
 
                     <Link
@@ -125,12 +130,13 @@ export default function HomePage() {
                         className="w-full sm:w-auto px-7 py-4 bg-slate-50 hover:bg-slate-100 dark:bg-[#182028] dark:hover:bg-[#1e2832] text-[#232e39] dark:text-slate-100 border border-slate-300 dark:border-slate-600/80 text-sm sm:text-base font-bold rounded-xl transition flex items-center justify-center gap-2"
                     >
                       Staff Portal Login
-                      <ArrowRight size={18} />
+                      <ArrowRight size={18}/>
                     </Link>
                   </div>
 
                   {/* Quick Capability Strip */}
-                  <div className="mt-10 pt-8 border-t border-slate-200/80 dark:border-slate-700/60 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-xs font-bold text-slate-600 dark:text-slate-300">
+                  <div
+                      className="mt-10 pt-8 border-t border-slate-200/80 dark:border-slate-700/60 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-xs font-bold text-slate-600 dark:text-slate-300">
                     {highlights.map((item) => (
                         <span key={item} className="inline-flex items-center gap-1.5">
                       <CheckCircle2
@@ -149,7 +155,8 @@ export default function HomePage() {
           {/* Feature Highlights */}
           <section className="pb-20 sm:pb-24 px-4 sm:px-6">
             <div className="max-w-5xl mx-auto">
-              <div className="mb-10 text-center sm:text-left flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+              <div
+                  className="mb-10 text-center sm:text-left flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     Core Capabilities
@@ -161,17 +168,19 @@ export default function HomePage() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {features.map(({ icon: Icon, title, description, tag }) => (
+                {features.map(({icon: Icon, title, description, tag}) => (
                     <div
                         key={title}
                         className="p-7 bg-white dark:bg-[#232e39] rounded-3xl shadow-lg border border-slate-200/90 dark:border-slate-700/60 flex flex-col justify-between hover:-translate-y-0.5 transition-all"
                     >
                       <div>
                         <div className="flex items-center justify-between gap-3 mb-5">
-                          <div className="w-12 h-12 rounded-2xl bg-[#232e39] dark:bg-[#3e5063] text-white flex items-center justify-center shadow-sm">
-                            <Icon size={22} />
+                          <div
+                              className="w-12 h-12 rounded-2xl bg-[#232e39] dark:bg-[#3e5063] text-white flex items-center justify-center shadow-sm">
+                            <Icon size={22}/>
                           </div>
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#182028] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700/60">
+                          <span
+                              className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#182028] text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700/60">
                         {tag}
                       </span>
                         </div>
@@ -191,10 +200,29 @@ export default function HomePage() {
         </main>
 
         {/* Footer */}
-        <footer className="w-full py-6 px-4 bg-white dark:bg-[#232e39] border-t border-slate-200/80 dark:border-slate-700/60">
-          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+        <footer
+            className="w-full py-6 px-4 bg-white dark:bg-[#232e39] border-t border-slate-200/80 dark:border-slate-700/60">
+          <div
+              className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-medium text-slate-500 dark:text-slate-400">
             <span>&copy; {currentYear} ChamberCript. All rights reserved.</span>
-            <span>Protected Chamber &amp; Practice Management</span>
+
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              <Link
+                  href="/privacy-policy"
+                  className="hover:text-[#2A3642] dark:hover:text-white underline underline-offset-4 transition-colors"
+              >
+                Privacy Policy
+              </Link>
+              <span className="text-slate-300 dark:text-slate-600">•</span>
+              <Link
+                  href="/terms-and-conditions"
+                  className="hover:text-[#2A3642] dark:hover:text-white underline underline-offset-4 transition-colors"
+              >
+                Terms &amp; Conditions
+              </Link>
+              <span className="hidden md:inline text-slate-300 dark:text-slate-600">|</span>
+              <span className="hidden md:inline">Protected Chamber &amp; Practice Management</span>
+            </div>
           </div>
         </footer>
       </div>
