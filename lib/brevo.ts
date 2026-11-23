@@ -1,22 +1,33 @@
 import nodemailer from 'nodemailer';
 
-// Nodemailer Transporter එක සෑදීම
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: false, // Port 587 සඳහා false විය යුතුය
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD,
-    },
-});
-
 export const sendStaffInviteEmail = async (email: string, tempPass: string, role: string) => {
     try {
+        const host = process.env.SMTP_HOST;
+        const port = Number(process.env.SMTP_PORT) || 587;
+        const user = process.env.SMTP_USER;
+        const pass = process.env.SMTP_PASSWORD;
+
+        if (!host || !user || !pass) {
+            throw new Error(
+                `Missing SMTP env vars on server -> SMTP_HOST: ${!!host}, SMTP_USER: ${!!user}, SMTP_PASSWORD: ${!!pass}`
+            );
+        }
+
+        // Request එක එන අවස්ථාවේදීම Live Environment Variables සමඟ Transporter සෑදීම
+        const transporter = nodemailer.createTransport({
+            host,
+            port,
+            secure: port === 465, // Port 587 සඳහා false වේ
+            auth: {
+                user,
+                pass,
+            },
+        });
+
         const mailOptions = {
             from: '"Chambercript Admin" <ontocriptit@gmail.com>',
             to: email,
-            subject: "Your Law Firm Account Access",
+            subject: 'Your Law Firm Account Access',
             html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
           <h2 style="color: #2563eb;">Welcome to the Law Firm Management System</h2>
@@ -32,13 +43,11 @@ export const sendStaffInviteEmail = async (email: string, tempPass: string, role
       `,
         };
 
-        // Email එක යැවීම
         const info = await transporter.sendMail(mailOptions);
-        console.log("Email sent: " + info.messageId);
+        console.log('Email sent: ' + info.messageId);
         return true;
-
-    } catch (error) {
-        console.error("Error sending email: ", error);
-        throw new Error("Failed to send invitation email.");
+    } catch (error: any) {
+        console.error('Error sending email: ', error);
+        throw new Error(error?.message || 'Failed to send invitation email.');
     }
 };
