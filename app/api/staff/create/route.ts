@@ -2,10 +2,13 @@ import { NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { sendStaffInviteEmail } from '@/lib/brevo';
 
+// ❌ export const runtime = 'nodejs'; (මෙම පේළිය ඉවත් කර ඇත)
+
 export async function POST(req: Request) {
     try {
-        const adminAuth = getAdminAuth();
-        const adminDb = getAdminDb();
+        // අනිවාර්යයෙන්ම await භාවිතා කළ යුතුය (කලින් පියවරේ සැකසූ පරිදි)
+        const adminAuth = await getAdminAuth();
+        const adminDb = await getAdminDb();
 
         const body = await req.json();
         const { email, name, role, permissions, firmId } = body;
@@ -39,22 +42,23 @@ export async function POST(req: Request) {
             createdAt: new Date().toISOString(),
         });
 
-        // 4. Send Email via SMTP (isolated so user creation succeeds even if email fails)
+        // 4. Send Email via Brevo/Nodemailer
         try {
             await sendStaffInviteEmail(email.trim(), tempPassword, role);
         } catch (emailError: any) {
             console.error('Email failed to send:', emailError);
             return NextResponse.json({
                 success: true,
-                message: 'Staff created successfully, but the invitation email failed to send.',
+                message: 'Staff created successfully, but the invitation email failed to send.'
             });
         }
 
         return NextResponse.json({ success: true, message: 'Staff created and email sent.' });
+
     } catch (error: any) {
         console.error('API Error:', error);
         return NextResponse.json(
-            { success: false, error: error?.message || 'Internal Server Error' },
+            { success: false, error: error.message || 'Internal Server Error' },
             { status: 500 }
         );
     }

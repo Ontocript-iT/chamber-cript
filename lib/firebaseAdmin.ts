@@ -1,5 +1,4 @@
 import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
-// ESM ගැටලුව (jose crash) වළක්වා ගැනීමට 'firebase-admin/auth' හෝ 'firestore' කෙලින්ම import නොකරයි
 
 function getAdminApp(): App {
     const existingApps = getApps();
@@ -28,18 +27,15 @@ function getAdminApp(): App {
     });
 }
 
-// Netlify හිදී Runtime ESM crash එකක් නොපැමිණීමට 'firebase-admin' හරහාම dynamic ලෙස අමතයි
-export function getAdminAuth() {
+// ESM දෝෂය සම්පූර්ණයෙන්ම මඟ හැරීමට Dynamic Import (await import) භාවිතා කිරීම
+export async function getAdminAuth() {
     const app = getAdminApp();
-    // TypeScript පරීක්ෂාවෙන් බේරීමට require හරහා ගෙන as any යොදයි
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getAuth } = require('firebase-admin/auth');
+    const { getAuth } = await import('firebase-admin/auth');
     return getAuth(app);
 }
 
-export function getAdminDb() {
+export async function getAdminDb() {
     const app = getAdminApp();
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getFirestore } = require('firebase-admin/firestore');
+    const { getFirestore } = await import('firebase-admin/firestore');
     return getFirestore(app);
 }
