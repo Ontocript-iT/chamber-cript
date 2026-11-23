@@ -2,9 +2,6 @@ import { NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { sendStaffInviteEmail } from '@/lib/brevo';
 
-// Netlify හිදී මෙය Node.js පරිසරයේ ක්‍රියාත්මක වන බවට සහතික කිරීම
-export const runtime = 'nodejs';
-
 export async function POST(req: Request) {
     try {
         const adminAuth = getAdminAuth();
@@ -42,23 +39,22 @@ export async function POST(req: Request) {
             createdAt: new Date().toISOString(),
         });
 
-        // 4. Send Email - වෙනම try/catch එකක් තුළ (Email යැවීම ෆේල් වුවත් User සෑදීම සාර්ථක බව පෙන්වීමට)
+        // 4. Send Email via SMTP (isolated so user creation succeeds even if email fails)
         try {
             await sendStaffInviteEmail(email.trim(), tempPassword, role);
         } catch (emailError: any) {
             console.error('Email failed to send:', emailError);
             return NextResponse.json({
                 success: true,
-                message: 'Staff created successfully, but the invitation email failed to send.'
+                message: 'Staff created successfully, but the invitation email failed to send.',
             });
         }
 
         return NextResponse.json({ success: true, message: 'Staff created and email sent.' });
-
     } catch (error: any) {
         console.error('API Error:', error);
         return NextResponse.json(
-            { success: false, error: error.message || 'Internal Server Error' },
+            { success: false, error: error?.message || 'Internal Server Error' },
             { status: 500 }
         );
     }
