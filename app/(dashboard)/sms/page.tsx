@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import {
     MessageSquare, Send, CheckCircle, Clock, AlertTriangle,
     Search, Package, X, RefreshCw, History, User, Phone,
-    ChevronDown, ChevronUp, CreditCard
+    ChevronDown, ChevronUp, CreditCard, Calendar, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 const PACKAGES = [
@@ -40,6 +40,14 @@ export default function SMSManagementPage() {
     const [failedSmsList, setFailedSmsList] = useState<any[]>([]);
     const [showFailedPanel, setShowFailedPanel] = useState(false);
     const [resendingId, setResendingId] = useState<string | null>(null);
+
+    // --- SENT MESSAGE HISTORY, FILTER & PAGINATION STATES ---
+    const [sentMessages, setSentMessages] = useState<any[]>([]);
+    const [showSentHistory, setShowSentHistory] = useState(true);
+    const [msgDateFilter, setMsgDateFilter] = useState('');
+    const [msgRangeFilter, setMsgRangeFilter] = useState<'ALL' | 'TODAY' | 'LAST_7' | 'THIS_MONTH'>('ALL');
+    const [msgPage, setMsgPage] = useState(1);
+    const MSG_PER_PAGE = 5;
 
     // --- CUSTOM MODALS ---
     const [alertModal, setAlertModal] = useState<{ isOpen: boolean; title: string; message: string; type: 'success' | 'error' | 'info' }>({
@@ -95,8 +103,9 @@ export default function SMSManagementPage() {
                 const casesList = caseSnap.docs.map(d => ({ id: d.id, ...d.data() }));
                 setCases(casesList);
 
-                // Fetch Failed SMS from each case's messages subcollection with firmId filter
+                // Fetch Sent & Failed SMS from each case's messages subcollection with firmId filter
                 const allFailedMsgs: any[] = [];
+                const allMsgs: any[] = [];
                 for (const c of casesList) {
                     const msgQuery = query(
                         collection(db, 'cases', c.id, 'messages'),
@@ -105,13 +114,24 @@ export default function SMSManagementPage() {
                     const msgSnap = await getDocs(msgQuery);
                     msgSnap.docs.forEach(d => {
                         const data = d.data();
+                        const enriched = {
+                            id: d.id,
+                            ref: d.ref,
+                            caseId: c.id,
+                            clientName: (c as any).clientName || '',
+                            caseTitle: (c as any).title || '',
+                            ...data,
+                        };
+                        allMsgs.push(enriched);
                         if (data.status === 'Failed') {
-                            allFailedMsgs.push({ id: d.id, ref: d.ref, caseId: c.id, ...data });
+                            allFailedMsgs.push(enriched);
                         }
                     });
                 }
                 allFailedMsgs.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+                allMsgs.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
                 setFailedSmsList(allFailedMsgs);
+                setSentMessages(allMsgs);
             } catch (err) {
                 console.error(err);
             } finally {
@@ -183,12 +203,24 @@ export default function SMSManagementPage() {
 
             if (data.success) {
                 await safeDecrementSmsQuota(firmData.id);
-                await addDoc(collection(db, 'cases', selectedClient.caseId, 'messages'), payload);
+                const sentRef = await addDoc(collection(db, 'cases', selectedClient.caseId, 'messages'), payload);
 
+                setSentMessages(prev => [
+                    {
+                        id: sentRef.id,
+                        ref: sentRef,
+                        caseId: selectedClient.caseId,
+                        clientName: selectedClient.name,
+                        caseTitle: selectedClient.caseTitle,
+                        ...payload,
+                    },
+                    ...prev,
+                ]);
+                setMsgPage(1);
                 setMessageBody('');
                 setFirmData((prev: any) => ({ ...prev, smsQuota: prev.smsQuota > 0 ? prev.smsQuota - 1 : 0 }));
                 setAlertModal({ isOpen: true, title: 'SMS Dispatched', message: `Message successfully sent to ${selectedClient.name}.`, type: 'success' });
-            } else {
+            }else {
                 const failedRef = await addDoc(collection(db, 'cases', selectedClient.caseId, 'messages'), payload);
                 setFailedSmsList(prev => [{ id: failedRef.id, ref: failedRef, caseId: selectedClient.caseId, ...payload }, ...prev]);
                 throw new Error(data.error || 'Provider Failed');
@@ -216,14 +248,18 @@ export default function SMSManagementPage() {
             const data = await res.json();
 
             if (data.success) {
+                const updatedAt = new Date().toISOString();
                 if (msg.ref) {
-                    await updateDoc(msg.ref, { status: 'Sent', sentAt: new Date().toISOString() });
+                    await updateDoc(msg.ref, { status: 'Sent', sentAt: updatedAt });
                 }
 
                 await safeDecrementSmsQuota(firmData.id);
 
                 setFirmData((prev: any) => ({ ...prev, smsQuota: prev.smsQuota > 0 ? prev.smsQuota - 1 : 0 }));
                 setFailedSmsList(prev => prev.filter(m => m.id !== msg.id));
+                setSentMessages(prev =>
+                    prev.map(m => (m.id === msg.id ? { ...m, status: 'Sent', sentAt: updatedAt } : m))
+                );
                 setAlertModal({ isOpen: true, title: 'SMS Resent', message: 'Message was successfully delivered.', type: 'success' });
             } else {
                 throw new Error(data.error || 'SMS API Provider Failed');
@@ -240,6 +276,36 @@ export default function SMSManagementPage() {
         (c.title || '').toLowerCase().includes(caseSearch.toLowerCase()) ||
         (c.contactNo || '').toLowerCase().includes(caseSearch.toLowerCase())
     );
+
+    const filteredSentMessages = sentMessages.filter(m => {
+        if (!m.sentAt) return false;
+        const sentDate = new Date(m.sentAt);
+        const sentLocalYMD = sentDate.toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+        if (msgDateFilter && sentLocalYMD !== msgDateFilter) {
+            return false;
+        }
+
+        if (!msgDateFilter && msgRangeFilter !== 'ALL') {
+            const now = new Date();
+            if (msgRangeFilter === 'TODAY') {
+                return sentLocalYMD === now.toLocaleDateString('en-CA');
+            }
+            if (msgRangeFilter === 'LAST_7') {
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(now.getDate() - 7);
+                return sentDate >= sevenDaysAgo;
+            }
+            if (msgRangeFilter === 'THIS_MONTH') {
+                return sentDate.getMonth() === now.getMonth() && sentDate.getFullYear() === now.getFullYear();
+            }
+        }
+
+        return true;
+    });
+
+    const totalMsgPages = Math.max(1, Math.ceil(filteredSentMessages.length / MSG_PER_PAGE));
+    const currentSentMessages = filteredSentMessages.slice((msgPage - 1) * MSG_PER_PAGE, msgPage * MSG_PER_PAGE);
 
     const smsSegments = Math.max(1, Math.ceil(messageBody.length / 160));
     const inputStyle = "w-full px-4 py-3 bg-white dark:bg-[#182028] border border-slate-300 dark:border-[#465769]/80 rounded-xl text-sm font-medium text-[#2A3642] dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none focus:border-[#2A3642] dark:focus:border-slate-300 focus:ring-4 focus:ring-[#465769]/15 transition-all";
@@ -486,6 +552,183 @@ export default function SMSManagementPage() {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* Sent Message History Card (Date Filtered & Paginated) */}
+            <div className="bg-white dark:bg-[#2A3642] rounded-3xl shadow-sm border border-slate-200/80 dark:border-[#465769]/40 overflow-hidden">
+                <button
+                    type="button"
+                    onClick={() => setShowSentHistory(!showSentHistory)}
+                    className="w-full px-6 sm:px-8 py-5 bg-[#F8FAFC] dark:bg-[#222C36] border-b border-slate-200/80 dark:border-[#465769]/40 flex justify-between items-center text-left cursor-pointer hover:bg-slate-100/70 dark:hover:bg-[#1E2730] transition"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#465769]/15 dark:bg-[#465769] text-[#2A3642] dark:text-white flex items-center justify-center">
+                            <MessageSquare size={18} />
+                        </div>
+                        <div>
+                            <h3 className="text-base font-extrabold text-[#2A3642] dark:text-white flex items-center gap-2">
+                                Sent Message History
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-[#2A3642] dark:bg-[#465769] text-white">
+                                            {filteredSentMessages.length}
+                                        </span>
+                            </h3>
+                            <p className="text-xs text-[#465769] dark:text-slate-400 font-medium">
+                                Complete outbound SMS log filterable by date
+                            </p>
+                        </div>
+                    </div>
+                    <div className="p-2 rounded-xl bg-white dark:bg-[#1E2730] border border-slate-200 dark:border-[#465769]/50 text-[#465769] dark:text-slate-300">
+                        {showSentHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </div>
+                </button>
+
+                {showSentHistory && (
+                    <div className="p-6 sm:p-8 space-y-5">
+                        {/* Date-Wise Filter Bar */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E2730] border border-slate-200/80 dark:border-[#465769]/40">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                                {([
+                                    { id: 'ALL', label: 'All Time' },
+                                    { id: 'TODAY', label: 'Today' },
+                                    { id: 'LAST_7', label: 'Last 7 Days' },
+                                    { id: 'THIS_MONTH', label: 'This Month' },
+                                ] as const).map(tab => (
+                                    <button
+                                        key={tab.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setMsgDateFilter('');
+                                            setMsgRangeFilter(tab.id);
+                                            setMsgPage(1);
+                                        }}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                                            !msgDateFilter && msgRangeFilter === tab.id
+                                                ? 'bg-[#2A3642] dark:bg-[#465769] text-white shadow-2xs'
+                                                : 'bg-white dark:bg-[#2A3642] text-[#465769] dark:text-slate-300 border border-slate-200 dark:border-[#465769]/50 hover:border-[#465769]'
+                                        }`}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <div className="relative flex items-center">
+                                    <Calendar size={14} className="absolute left-3 text-[#465769] dark:text-slate-400 pointer-events-none" />
+                                    <input
+                                        type="date"
+                                        value={msgDateFilter}
+                                        onChange={e => {
+                                            setMsgDateFilter(e.target.value);
+                                            setMsgPage(1);
+                                        }}
+                                        aria-label="Filter messages by date"
+                                        className="pl-8 pr-3 py-1.5 bg-white dark:bg-[#2A3642] border border-slate-200 dark:border-[#465769]/60 rounded-xl text-xs font-bold text-[#2A3642] dark:text-white outline-none focus:border-[#465769]"
+                                    />
+                                </div>
+                                {(msgDateFilter || msgRangeFilter !== 'ALL') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setMsgDateFilter('');
+                                            setMsgRangeFilter('ALL');
+                                            setMsgPage(1);
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800/50 text-xs font-bold hover:bg-rose-100 transition cursor-pointer"
+                                    >
+                                        Reset
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Message List */}
+                        {currentSentMessages.length === 0 ? (
+                            <div className="text-center py-10 bg-[#F8FAFC] dark:bg-[#1E2730] rounded-2xl border border-dashed border-slate-200 dark:border-[#465769]/50">
+                                <MessageSquare size={32} className="mx-auto mb-2 text-slate-400 opacity-50" />
+                                <p className="text-sm font-bold text-[#2A3642] dark:text-slate-200">No messages found</p>
+                                <p className="text-xs text-slate-400 mt-0.5">No SMS records match the selected date filter.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {currentSentMessages.map(sms => (
+                                    <div
+                                        key={sms.id}
+                                        className="p-4 rounded-2xl bg-[#F8FAFC] dark:bg-[#1E2730] border border-slate-200/80 dark:border-[#465769]/40 space-y-2.5"
+                                    >
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                                        <span className="text-xs font-extrabold text-[#2A3642] dark:text-white">
+                                                            {sms.clientName || 'Client'}
+                                                        </span>
+                                                <span className="text-[11px] font-mono font-bold text-[#465769] dark:text-slate-300 bg-white dark:bg-[#2A3642] px-2 py-0.5 rounded-md border border-slate-200 dark:border-[#465769]/50">
+                                                            {sms.sentTo}
+                                                        </span>
+                                                {sms.caseTitle && (
+                                                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate max-w-[220px]">
+                                                                • {sms.caseTitle}
+                                                            </span>
+                                                )}
+                                            </div>
+
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                                            {new Date(sms.sentAt).toLocaleString()}
+                                                        </span>
+                                                <span
+                                                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border ${
+                                                        sms.status === 'Failed'
+                                                            ? 'bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
+                                                            : 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                                                    }`}
+                                                >
+                                                            {sms.status}
+                                                        </span>
+                                            </div>
+                                        </div>
+
+                                        <p className="text-xs sm:text-sm text-[#2A3642] dark:text-slate-200 bg-white dark:bg-[#2A3642] p-3 rounded-xl border border-slate-200/70 dark:border-[#465769]/40 whitespace-pre-wrap">
+                                            {sms.message}
+                                        </p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Pagination Controls */}
+                        {filteredSentMessages.length > MSG_PER_PAGE && (
+                            <div className="pt-3 border-t border-slate-200/80 dark:border-[#465769]/40 flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-xs font-semibold text-[#465769] dark:text-slate-400">
+                                    Showing {(msgPage - 1) * MSG_PER_PAGE + 1}–{Math.min(msgPage * MSG_PER_PAGE, filteredSentMessages.length)} of {filteredSentMessages.length}
+                                </p>
+
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={msgPage === 1}
+                                        onClick={() => setMsgPage(p => Math.max(1, p - 1))}
+                                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#F8FAFC] dark:bg-[#1E2730] border border-slate-200 dark:border-[#465769]/50 text-xs font-bold text-[#2A3642] dark:text-white hover:bg-slate-100 dark:hover:bg-[#354453] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
+                                    >
+                                        <ChevronLeft size={14} /> Prev
+                                    </button>
+
+                                    <span className="text-xs font-extrabold text-[#2A3642] dark:text-white px-2">
+                                                Page {msgPage} of {totalMsgPages}
+                                            </span>
+
+                                    <button
+                                        type="button"
+                                        disabled={msgPage === totalMsgPages}
+                                        onClick={() => setMsgPage(p => Math.min(totalMsgPages, p + 1))}
+                                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#F8FAFC] dark:bg-[#1E2730] border border-slate-200 dark:border-[#465769]/50 text-xs font-bold text-[#2A3642] dark:text-white hover:bg-slate-100 dark:hover:bg-[#354453] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
+                                    >
+                                        Next <ChevronRight size={14} />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* ================= FAILED SMS SLIDE-OUT DRAWER ================= */}

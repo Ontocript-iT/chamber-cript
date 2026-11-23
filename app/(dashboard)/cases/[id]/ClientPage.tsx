@@ -2,13 +2,13 @@
 
 import { useEffect, useState, use } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, deleteDoc, increment } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, addDoc, getDocs, query, where, orderBy, deleteDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
     ArrowLeft, Edit, Save, ChevronDown, ChevronUp, Plus,
     Trash2, Send, MessageSquare, History, Calendar, CalendarClock, FileText, X, Activity, User,
-    MoreVertical, CheckCircle, Clock, AlertTriangle, Settings, Phone, Mail, Printer, Eye
+    MoreVertical, CheckCircle, Clock, AlertTriangle, Settings, Phone, Mail, Printer, Eye, ExternalLink
 } from 'lucide-react';
 
 import { logActivity } from '@/lib/logger';
@@ -60,11 +60,12 @@ export default function AdvancedCaseViewPage(props: PageProps) {
     const [userPerms, setUserPerms] = useState({ read: false, write: false, sms: false });
 
     const [loading, setLoading] = useState(true);
+    const [savingCase, setSavingCase] = useState(false);
     const [firmId, setFirmId] = useState('');
-    const [activeUser, setActiveUser] = useState<{uid: string, name: string}>({uid: '', name: ''});
-    const [staffList, setStaffList] = useState<{id: string, name: string}[]>([]);
+    const [activeUser, setActiveUser] = useState<{ uid: string; name: string }>({ uid: '', name: '' });
+    const [staffList, setStaffList] = useState<{ id: string; name: string }[]>([]);
 
-    // UI-only state: which tab is open, whether "all logs" are shown, whether the add-event form is open
+    // UI-only state
     const [activeTab, setActiveTab] = useState<'timeline' | 'sms'>('timeline');
     const [expandedSections, setExpandedSections] = useState({ timeline: false });
     const [showTlForm, setShowTlForm] = useState(false);
@@ -113,7 +114,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
     const isImageFile = (url: string, name: string) =>
         /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(url) ||
         /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
-
 
     const handlePrintPreviewDoc = async () => {
         if (!previewDoc.url) return;
@@ -192,7 +192,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
         }
     };
 
-
     useEffect(() => {
         const fetchData = async (user: any) => {
             try {
@@ -220,13 +219,26 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                 const caseRef = doc(db, 'cases', caseId);
                 const caseSnap = await getDoc(caseRef);
                 if (!caseSnap.exists() || caseSnap.data().firmId !== uFirmId) {
-                    router.push('/cases'); return;
+                    router.push('/cases');
+                    return;
                 }
                 const data = caseSnap.data();
                 setCaseData({ id: caseSnap.id, ...data });
                 setEditForm({ ...data });
-                setEditDocs(data.documents || []);
-                setEditCustomFields(Object.entries(data.customFields || {}).map(([key, value]) => ({ id: Date.now()+key, key, value: value as string })));
+                setEditDocs(
+                    (data.documents || []).map((d: any, idx: number) => ({
+                        id: d.id || `${Date.now()}-${idx}`,
+                        name: d.name || 'Document',
+                        url: d.url,
+                    }))
+                );
+                setEditCustomFields(
+                    Object.entries(data.customFields || {}).map(([key, value]) => ({
+                        id: Date.now() + key,
+                        key,
+                        value: value as string,
+                    }))
+                );
 
                 const staffQ = query(collection(db, 'users'), where('firmId', '==', uFirmId));
                 const staffSnap = await getDocs(staffQ);
@@ -236,7 +248,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                 const tlSnap = await getDocs(tlQ);
                 setTimeline(tlSnap.docs.map(d => ({ id: d.id, ...d.data() } as TimelineEntry)));
 
-
                 const smsQ = query(
                     collection(db, 'cases', caseId, 'messages'),
                     where('firmId', '==', uFirmId),
@@ -244,48 +255,86 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                 );
                 const smsSnap = await getDocs(smsQ);
                 setSmsHistory(smsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SmsEntry)));
-
-            } catch (err) { console.error(err); } finally { setLoading(false); }
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setLoading(false);
+            }
         };
 
         const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) fetchData(user); else router.push('/login');
+            if (user) fetchData(user);
+            else router.push('/login');
         });
         return () => unsubscribe();
     }, [caseId, router]);
 
     const uploadFiles = async (docsArray: DocEntry[]) => {
-        const uploaded = [];
+        const uploaded: { name: string; url: string }[] = [];
+
         for (const d of docsArray) {
-            if (d.url) { uploaded.push({ name: d.name, url: d.url }); continue; }
-            if (d.file && d.name) {
+            // Keep already-uploaded documents
+            if (d.url) {
+                uploaded.push({ name: (d.name || '').trim() || 'Document', url: d.url });
+                continue;
+            }
+
+            // Upload newly selected files (fallback to file.name if custom label is empty)
+            if (d.file) {
+                const docLabel = (d.name || '').trim() || d.file.name;
                 const formData = new FormData();
                 formData.append('file', d.file);
                 formData.append('fileName', d.file.name);
+
                 const res = await fetch('/api/upload', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.success) uploaded.push({ name: d.name, url: data.url });
+                const data = await res.json().catch(() => ({}));
+
+                const fileUrl = data.url || data.secure_url || data.fileUrl;
+                if (!res.ok || data.success === false || !fileUrl) {
+                    throw new Error(data.error || `Failed to upload "${docLabel}".`);
+                }
+
+                uploaded.push({ name: docLabel, url: fileUrl });
             }
         }
+
         return uploaded;
     };
 
     const handleSaveCase = async () => {
         if (!userPerms.write) return;
-        setLoading(true);
+        setSavingCase(true);
         try {
             const finalDocs = await uploadFiles(editDocs);
-            const customFieldsObj = editCustomFields.reduce((acc, curr) => ({ ...acc, [curr.key]: curr.value }), {});
-            await updateDoc(doc(db, 'cases', caseId), { ...editForm, documents: finalDocs, customFields: customFieldsObj });
+            const customFieldsObj = editCustomFields.reduce(
+                (acc, curr) => (curr.key.trim() ? { ...acc, [curr.key.trim()]: curr.value } : acc),
+                {}
+            );
+            const { id: _ignoreId, ...cleanEditForm } = editForm;
+
+            await updateDoc(doc(db, 'cases', caseId), {
+                ...cleanEditForm,
+                documents: finalDocs,
+                customFields: customFieldsObj,
+            });
+
             await logActivity(firmId, activeUser.uid, activeUser.name, 'CASE_UPDATED', `Updated case details`, caseId, caseData.title);
-            setCaseData({ ...editForm, documents: finalDocs, customFields: customFieldsObj });
+
+            setCaseData({ ...caseData, ...cleanEditForm, documents: finalDocs, customFields: customFieldsObj });
+            setEditDocs(finalDocs.map((d, idx) => ({ id: `${Date.now()}-${idx}`, name: d.name, url: d.url })));
             setIsEditing(false);
             setAlertModal({ isOpen: true, title: 'Success', message: 'Case updated successfully!', type: 'success' });
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to update case.', type: 'error' });
+            setAlertModal({
+                isOpen: true,
+                title: 'Upload / Save Error',
+                message: err?.message || 'Failed to update case.',
+                type: 'error',
+            });
+        } finally {
+            setSavingCase(false);
         }
-        setLoading(false);
     };
 
     const updateGlobalStatus = async () => {
@@ -309,8 +358,9 @@ export default function AdvancedCaseViewPage(props: PageProps) {
         } catch (err) {
             console.error(err);
             setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to update status.', type: 'error' });
+        } finally {
+            setStatusUpdating(false);
         }
-        setStatusUpdating(false);
     };
 
     const getGlobalStatusStyle = (status: string) => {
@@ -338,15 +388,16 @@ export default function AdvancedCaseViewPage(props: PageProps) {
             setTimeline([{ id: docRef.id, ...newEntry } as TimelineEntry, ...timeline]);
             setTlForm({ date: '', type: 'Status update (Proxy/Motion)', customType: '', notes: '', staffId: '' });
             setTlDocs([]);
+            setShowTlForm(false);
 
-            // Expand timeline to show the newly added item
             setExpandedSections(prev => ({ ...prev, timeline: true }));
             setAlertModal({ isOpen: true, title: 'Success', message: 'Timeline updated successfully!', type: 'success' });
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to add timeline update.', type: 'error' });
+            setAlertModal({ isOpen: true, title: 'Error', message: err?.message || 'Failed to add timeline update.', type: 'error' });
+        } finally {
+            setTlSaving(false);
         }
-        setTlSaving(false);
     };
 
     const updateTimelineStatus = async (id: string, newStatus: string) => {
@@ -392,7 +443,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
         setActiveDropdown(null);
     };
 
-    // මෙම කොටස sendTimelineSms ශ්‍රිතයට ඉහළින් ඇතුළත් කරන්න
     const recordSentSmsInFirestore = async (messageBody: string, logDescription: string) => {
         const newSms = {
             firmId: firmId,
@@ -404,7 +454,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
 
         let docId = Date.now().toString();
 
-        // 1. Message ඉතිහාසය සේව් කිරීම
         try {
             const docRef = await addDoc(collection(db, 'cases', caseId, 'messages'), newSms);
             docId = docRef.id;
@@ -412,7 +461,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
             console.error('Failed saving SMS to messages:', e);
         }
 
-        // 2. SMS Quota එක ආරක්ෂිතව අඩු කිරීම (String තිබුණත් Number කර අඩු කරයි)
         try {
             const firmRef = doc(db, 'firms', firmId);
             const firmSnap = await getDoc(firmRef);
@@ -426,7 +474,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
             console.error('Failed decrementing smsQuota:', e);
         }
 
-        // 3. Activity Log එක සටහන් කිරීම
         logActivity(firmId, activeUser.uid, activeUser.name, 'SMS_SENT', logDescription, caseId, caseData.title)
             .catch(e => console.error('Audit log error:', e));
 
@@ -449,7 +496,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
             const data = await res.json();
 
             if (data.success) {
-                // අලුත් ක්‍රමයට Firestore එකට ලිවීම
                 const savedEntry = await recordSentSmsInFirestore(
                     tlSmsModal.message,
                     `Sent SMS update to client (${caseData.contactNo})`
@@ -459,11 +505,11 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                 setTlSmsModal({ isOpen: false, message: '' });
                 setAlertModal({ isOpen: true, title: 'Success', message: 'SMS Sent Successfully!', type: 'success' });
             } else {
-                throw new Error(data.error || "SMS API Provider Failed");
+                throw new Error(data.error || 'SMS API Provider Failed');
             }
         } catch (err: any) {
             console.error(err);
-            setAlertModal({ isOpen: true, title: 'Error', message: "Failed to send SMS: " + err.message, type: 'error' });
+            setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to send SMS: ' + err.message, type: 'error' });
         } finally {
             setTlSmsSending(false);
         }
@@ -485,7 +531,6 @@ export default function AdvancedCaseViewPage(props: PageProps) {
             const data = await res.json();
 
             if (data.success) {
-                // අලුත් ක්‍රමයට Firestore එකට ලිවීම
                 const savedEntry = await recordSentSmsInFirestore(
                     smsMessage,
                     `Sent custom SMS to client (${caseData.contactNo})`
@@ -495,11 +540,11 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                 setSmsMessage('');
                 setAlertModal({ isOpen: true, title: 'Success', message: 'SMS Sent Successfully!', type: 'success' });
             } else {
-                throw new Error(data.error || "SMS API Provider Failed");
+                throw new Error(data.error || 'SMS API Provider Failed');
             }
         } catch (err: any) {
             console.error(err);
-            setAlertModal({ isOpen: true, title: 'Error', message: "Failed to send SMS: " + err.message, type: 'error' });
+            setAlertModal({ isOpen: true, title: 'Error', message: 'Failed to send SMS: ' + err.message, type: 'error' });
         } finally {
             setSmsSending(false);
         }
@@ -590,7 +635,22 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                 </button>
                             )}
                             {userPerms.write && (
-                                <button onClick={() => setIsEditing(!isEditing)} className={ghostBtn}>
+                                <button
+                                    onClick={() => {
+                                        if (!isEditing) {
+                                            setEditForm({ ...caseData });
+                                            setEditDocs(
+                                                (caseData.documents || []).map((d: any, idx: number) => ({
+                                                    id: d.id || `${Date.now()}-${idx}`,
+                                                    name: d.name || 'Document',
+                                                    url: d.url,
+                                                }))
+                                            );
+                                        }
+                                        setIsEditing(!isEditing);
+                                    }}
+                                    className={ghostBtn}
+                                >
                                     {isEditing ? <X size={14} /> : <Edit size={14} />} {isEditing ? 'Cancel edit' : 'Edit case'}
                                 </button>
                             )}
@@ -663,38 +723,44 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                     <h3 className="text-sm font-bold text-[#2A3642] dark:text-white">Case details</h3>
                                     <div>
                                         <label className={labelStyle}>Case title *</label>
-                                        <input type="text" placeholder="Title *" value={editForm.title} onChange={e => setEditForm({...editForm, title: e.target.value})} className={inputStyle} />
+                                        <input type="text" placeholder="Title *" value={editForm.title || ''} onChange={e => setEditForm({ ...editForm, title: e.target.value })} className={inputStyle} />
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
                                             <label className={labelStyle}>Reference no</label>
-                                            <input type="text" placeholder="Reference No"
-                                                   value={editForm.referenceNo || ''} onChange={e => setEditForm({
-                                                ...editForm,
-                                                referenceNo: e.target.value
-                                            })} className={inputStyle}/>
+                                            <input
+                                                type="text"
+                                                placeholder="Reference No"
+                                                value={editForm.referenceNo || ''}
+                                                onChange={e => setEditForm({ ...editForm, referenceNo: e.target.value })}
+                                                className={inputStyle}
+                                            />
                                         </div>
                                         <div>
                                             <label className={labelStyle}>Court case no</label>
-                                            <input type="text" placeholder="Court Case No"
-                                                   value={editForm.courtCaseNo || ''} onChange={e => setEditForm({
-                                                ...editForm,
-                                                courtCaseNo: e.target.value
-                                            })} className={inputStyle}/>
+                                            <input
+                                                type="text"
+                                                placeholder="Court Case No"
+                                                value={editForm.courtCaseNo || ''}
+                                                onChange={e => setEditForm({ ...editForm, courtCaseNo: e.target.value })}
+                                                className={inputStyle}
+                                            />
                                         </div>
                                         <div>
                                             <label className={labelStyle}>Chamber ref</label>
-                                            <input type="text" placeholder="Chamber Ref" value={editForm.chamberRef}
-                                                   onChange={e => setEditForm({
-                                                       ...editForm,
-                                                       chamberRef: e.target.value
-                                                   })} className={inputStyle}/>
+                                            <input
+                                                type="text"
+                                                placeholder="Chamber Ref"
+                                                value={editForm.chamberRef || ''}
+                                                onChange={e => setEditForm({ ...editForm, chamberRef: e.target.value })}
+                                                className={inputStyle}
+                                            />
                                         </div>
                                         <div>
                                             <label className={labelStyle}>Case type</label>
                                             <select
                                                 value={editForm.type || ''}
-                                                onChange={e => setEditForm({...editForm, type: e.target.value})}
+                                                onChange={e => setEditForm({ ...editForm, type: e.target.value })}
                                                 className={`${inputStyle} cursor-pointer`}
                                             >
                                                 <option value="">Select Case Type *</option>
@@ -709,10 +775,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                     type="text"
                                                     placeholder="Specify Case Type"
                                                     value={editForm.customType || ''}
-                                                    onChange={e => setEditForm({
-                                                        ...editForm,
-                                                        customType: e.target.value
-                                                    })}
+                                                    onChange={e => setEditForm({ ...editForm, customType: e.target.value })}
                                                     className={`${inputStyle} mt-2`}
                                                     required
                                                 />
@@ -729,7 +792,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             type="text"
                                             placeholder="Client Name"
                                             value={editForm.clientName || ''}
-                                            onChange={e => setEditForm({...editForm, clientName: e.target.value})}
+                                            onChange={e => setEditForm({ ...editForm, clientName: e.target.value })}
                                             className={inputStyle}
                                         />
                                     </div>
@@ -739,7 +802,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             type="text"
                                             placeholder="Contact No"
                                             value={editForm.contactNo || ''}
-                                            onChange={e => setEditForm({...editForm, contactNo: e.target.value})}
+                                            onChange={e => setEditForm({ ...editForm, contactNo: e.target.value })}
                                             className={inputStyle}
                                         />
                                     </div>
@@ -748,7 +811,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             <label className={labelStyle}>ID type</label>
                                             <select
                                                 value={editForm.idType || 'NIC'}
-                                                onChange={e => setEditForm({...editForm, idType: e.target.value})}
+                                                onChange={e => setEditForm({ ...editForm, idType: e.target.value })}
                                                 className={`${inputStyle} cursor-pointer`}
                                             >
                                                 <option value="NIC">NIC</option>
@@ -768,7 +831,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                             : 'NIC Number'
                                                 }
                                                 value={editForm.idNumber || ''}
-                                                onChange={e => setEditForm({...editForm, idNumber: e.target.value})}
+                                                onChange={e => setEditForm({ ...editForm, idNumber: e.target.value })}
                                                 className={inputStyle}
                                             />
                                         </div>
@@ -779,7 +842,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             type="email"
                                             placeholder="Email"
                                             value={editForm.email || ''}
-                                            onChange={e => setEditForm({...editForm, email: e.target.value})}
+                                            onChange={e => setEditForm({ ...editForm, email: e.target.value })}
                                             className={inputStyle}
                                         />
                                     </div>
@@ -787,65 +850,96 @@ export default function AdvancedCaseViewPage(props: PageProps) {
 
                                 <div className="space-y-3 pt-6 border-t border-slate-200/80 dark:border-[#465769]/30">
                                     <h3 className="text-sm font-bold text-[#2A3642] dark:text-white">Documents</h3>
-                                    {editDocs.length === 0 &&
-                                        <p className="text-xs text-slate-400">No documents yet. Add one below.</p>}
+                                    {editDocs.length === 0 && (
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">No documents yet. Add one below.</p>
+                                    )}
                                     {editDocs.map((d, i) => (
-                                        <div key={d.id || i}
-                                             className="flex flex-wrap sm:flex-nowrap gap-3 items-center bg-[#F8FAFC] dark:bg-[#1E2730] p-3 rounded-xl border border-dashed border-slate-300 dark:border-[#465769]/50">
-                                            <input type="text" value={d.name} onChange={e => {
-                                                const nd = [...editDocs];
-                                                nd[i].name = e.target.value;
-                                                setEditDocs(nd);
-                                            }}
-                                                   className="px-3 py-2 bg-white dark:bg-[#2A3642] border border-slate-200 dark:border-[#465769]/50 rounded-lg w-full sm:w-2/5 text-xs font-semibold outline-none focus:border-[#465769] dark:text-white"
-                                                   placeholder="Document name"/>
-                                            {d.url ? <span
-                                                    className="text-xs text-emerald-600 font-bold truncate flex-1">Uploaded</span> :
-                                                <input type="file" onChange={e => {
-                                                    const nd = [...editDocs];
-                                                    nd[i].file = e.target.files?.[0];
-                                                    setEditDocs(nd);
-                                                }}
-                                                       className="flex-1 min-w-0 text-xs dark:text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#2A3642] dark:file:bg-[#465769] file:text-white hover:file:opacity-90 file:cursor-pointer"/>}
-                                            <button onClick={() => setEditDocs(editDocs.filter((_, idx) => idx !== i))}
-                                                    aria-label="Remove document"
-                                                    className="p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition">
-                                                <Trash2 size={16}/></button>
+                                        <div
+                                            key={d.id || i}
+                                            className="flex flex-wrap sm:flex-nowrap gap-3 items-center bg-[#F8FAFC] dark:bg-[#182028] p-3.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-500/70"
+                                        >
+                                            <input
+                                                type="text"
+                                                value={d.name}
+                                                onChange={e =>
+                                                    setEditDocs(prev =>
+                                                        prev.map((item, idx) => (idx === i ? { ...item, name: e.target.value } : item))
+                                                    )
+                                                }
+                                                className="px-3 py-2 bg-white dark:bg-[#2A3642] border border-slate-300 dark:border-slate-500/60 rounded-lg w-full sm:w-2/5 text-xs font-semibold text-[#2A3642] dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-400 outline-none focus:border-[#465769] dark:focus:border-slate-300"
+                                                placeholder="Document name"
+                                            />
+                                            {d.url ? (
+                                                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold truncate flex-1 flex items-center gap-1.5">
+                                                    <CheckCircle size={14} /> Uploaded
+                                                </span>
+                                            ) : (
+                                                <input
+                                                    type="file"
+                                                    onChange={e => {
+                                                        const selectedFile = e.target.files?.[0] || null;
+                                                        setEditDocs(prev =>
+                                                            prev.map((item, idx) =>
+                                                                idx === i
+                                                                    ? {
+                                                                        ...item,
+                                                                        file: selectedFile,
+                                                                        name: item.name.trim() || selectedFile?.name || '',
+                                                                    }
+                                                                    : item
+                                                            )
+                                                        );
+                                                    }}
+                                                    className="flex-1 min-w-0 text-xs font-medium text-slate-700 dark:text-slate-100 file:mr-3 file:py-2 file:px-3.5 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-[#2A3642] file:text-white dark:file:bg-slate-200 dark:file:text-[#182028] hover:file:opacity-90 file:cursor-pointer"
+                                                />
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => setEditDocs(prev => prev.filter((_, idx) => idx !== i))}
+                                                aria-label="Remove document"
+                                                className="p-2 text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer transition"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
                                         </div>
                                     ))}
-                                    <button onClick={() => setEditDocs([...editDocs, {
-                                        id: Date.now().toString(),
-                                        name: ''
-                                    }])}
-                                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#465769] dark:text-slate-300 hover:text-[#2A3642] dark:hover:text-white cursor-pointer transition">
-                                        <Plus size={14}/> Add document
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditDocs(prev => [...prev, { id: Date.now().toString(), name: '', file: null }])}
+                                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#F8FAFC] dark:bg-[#1E2730] border border-slate-200 dark:border-[#465769]/60 text-xs font-semibold text-[#2A3642] dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#354453] cursor-pointer transition"
+                                    >
+                                        <Plus size={14} /> Add document
                                     </button>
                                 </div>
 
                                 {/* Sticky save bar */}
                                 <div className="sticky bottom-3 flex gap-3 pt-2">
-                                    <button onClick={() => setIsEditing(false)} className={`${ghostBtn} px-5 py-3`}>Cancel</button>
-                                    <button onClick={handleSaveCase} disabled={loading} className={`${primaryBtn} flex-1 py-3 shadow-lg`}><Save size={17}/> Save changes</button>
+                                    <button type="button" onClick={() => setIsEditing(false)} disabled={savingCase} className={`${ghostBtn} px-5 py-3`}>
+                                        Cancel
+                                    </button>
+                                    <button type="button" onClick={handleSaveCase} disabled={savingCase} className={`${primaryBtn} flex-1 py-3 shadow-lg`}>
+                                        <Save size={17} /> {savingCase ? 'Uploading & Saving...' : 'Save changes'}
+                                    </button>
                                 </div>
                             </div>
                         ) : (
                             <div className="p-5 sm:p-6 space-y-6">
                                 <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                                    <Field label="Reference no" value={caseData.referenceNo}/>
-                                    <Field label="Court case no" value={caseData.courtCaseNo}/>
-                                    <Field label="Chamber ref" value={caseData.chamberRef}/>
-                                    <Field label="Case type" value={caseData.type}/>
+                                    <Field label="Reference no" value={caseData.referenceNo} />
+                                    <Field label="Court case no" value={caseData.courtCaseNo} />
+                                    <Field label="Chamber ref" value={caseData.chamberRef} />
+                                    <Field label="Case type" value={caseData.type} />
                                 </div>
 
                                 <div className="pt-5 border-t border-slate-200/80 dark:border-[#465769]/30">
                                     <h3 className="text-sm font-bold text-[#2A3642] dark:text-white mb-3 flex items-center gap-2">
-                                        <User size={15} className="text-[#465769] dark:text-slate-400"/> Client
+                                        <User size={15} className="text-[#465769] dark:text-slate-400" /> Client
                                     </h3>
                                     <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                                        <Field label="Name" value={caseData.clientName}/>
-                                        <Field label="Contact number" value={caseData.contactNo}/>
-                                        <Field label={`${caseData.idType || 'NIC'} number`} value={caseData.idNumber}/>
-                                        <Field label="Email" value={caseData.email}/>
+                                        <Field label="Name" value={caseData.clientName} />
+                                        <Field label="Contact number" value={caseData.contactNo} />
+                                        <Field label={`${caseData.idType || 'NIC'} number`} value={caseData.idNumber} />
+                                        <Field label="Email" value={caseData.email} />
                                     </div>
                                 </div>
 
@@ -854,7 +948,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                         Documents ({docCount})
                                     </h3>
                                     {docCount === 0 ? (
-                                        <p className="text-xs text-slate-400">
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">
                                             No documents attached.{userPerms.write ? ' Use Edit case to add some.' : ''}
                                         </p>
                                     ) : (
@@ -862,22 +956,22 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             {caseData.documents?.map((d: any, i: number) => (
                                                 <div
                                                     key={i}
-                                                    onClick={() => setPreviewDoc({
-                                                        isOpen: true,
-                                                        name: d.name || `Document ${i + 1}`,
-                                                        url: d.url
-                                                    })}
+                                                    onClick={() =>
+                                                        setPreviewDoc({
+                                                            isOpen: true,
+                                                            name: d.name || `Document ${i + 1}`,
+                                                            url: d.url,
+                                                        })
+                                                    }
                                                     className="flex items-center justify-between gap-3 text-sm font-medium bg-[#F8FAFC] dark:bg-[#1E2730] text-[#2A3642] dark:text-slate-200 px-4 py-3 rounded-xl border border-slate-200 dark:border-[#465769]/50 hover:border-[#465769] dark:hover:border-slate-400 transition cursor-pointer group"
                                                 >
                                                     <div className="flex items-center gap-3 min-w-0">
-                                                        <FileText size={16}
-                                                                  className="text-[#465769] dark:text-slate-400 shrink-0"/>
+                                                        <FileText size={16} className="text-[#465769] dark:text-slate-400 shrink-0" />
                                                         <span className="truncate">{d.name}</span>
                                                     </div>
-                                                    <span
-                                                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#465769] dark:text-slate-300 group-hover:text-[#2A3642] dark:group-hover:text-white shrink-0">
-                        <Eye size={14}/> Preview &amp; Print
-                    </span>
+                                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#465769] dark:text-slate-300 group-hover:text-[#2A3642] dark:group-hover:text-white shrink-0">
+                                                        <Eye size={14} /> Preview &amp; Print
+                                                    </span>
                                                 </div>
                                             ))}
                                         </div>
@@ -889,22 +983,20 @@ export default function AdvancedCaseViewPage(props: PageProps) {
 
                     {/* ---------- RIGHT: TABS (TIMELINE / MESSAGES) ---------- */}
                     <section className={`${cardStyle} xl:col-span-7`}>
-                        <div
-                            className="px-3 sm:px-4 border-b border-slate-200/80 dark:border-[#465769]/40 flex items-center gap-1"
-                            role="tablist">
+                        <div className="px-3 sm:px-4 border-b border-slate-200/80 dark:border-[#465769]/40 flex items-center gap-1" role="tablist">
                             <button
-                                role="tab" aria-selected={activeTab === 'timeline'}
+                                role="tab"
+                                aria-selected={activeTab === 'timeline'}
                                 onClick={() => setActiveTab('timeline')}
                                 className={`relative flex items-center gap-2 px-4 py-4 text-sm font-semibold transition cursor-pointer ${activeTab === 'timeline' ? 'text-[#2A3642] dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-[#2A3642] dark:hover:text-white'}`}
                             >
-                                <Activity size={17}/> Timeline
-                                <span
-                                    className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#1E2730] text-[#465769] dark:text-slate-300">{timeline.length}</span>
-                                {activeTab === 'timeline' && <span
-                                    className="absolute left-3 right-3 -bottom-px h-0.5 bg-[#2A3642] dark:bg-slate-200 rounded-full"/>}
+                                <Activity size={17} /> Timeline
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-[#1E2730] text-[#465769] dark:text-slate-300">{timeline.length}</span>
+                                {activeTab === 'timeline' && <span className="absolute left-3 right-3 -bottom-px h-0.5 bg-[#2A3642] dark:bg-slate-200 rounded-full" />}
                             </button>
                             <button
-                                role="tab" aria-selected={activeTab === 'sms'}
+                                role="tab"
+                                aria-selected={activeTab === 'sms'}
                                 onClick={() => setActiveTab('sms')}
                                 className={`relative flex items-center gap-2 px-4 py-4 text-sm font-semibold transition cursor-pointer ${activeTab === 'sms' ? 'text-[#2A3642] dark:text-white' : 'text-slate-500 dark:text-slate-400 hover:text-[#2A3642] dark:hover:text-white'}`}
                             >
@@ -927,12 +1019,17 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div>
                                                     <label className={labelStyle}>Date *</label>
-                                                    <input type="date" value={tlForm.date} onChange={e => setTlForm({...tlForm, date: e.target.value})} className={inputStyle} />
+                                                    <input type="date" value={tlForm.date} onChange={e => setTlForm({ ...tlForm, date: e.target.value })} className={inputStyle} />
                                                 </div>
                                                 <div>
                                                     <label className={labelStyle}>Event type *</label>
-                                                    <select value={tlForm.type} onChange={e => setTlForm({...tlForm, type: e.target.value})} className={inputStyle}>
-                                                        <option>Status update (Proxy/Motion)</option><option>Hearing date</option><option>Minute/Proceeding</option><option>Document filed</option><option>Payment</option><option>Custom/Other</option>
+                                                    <select value={tlForm.type} onChange={e => setTlForm({ ...tlForm, type: e.target.value })} className={inputStyle}>
+                                                        <option>Status update (Proxy/Motion)</option>
+                                                        <option>Hearing date</option>
+                                                        <option>Minute/Proceeding</option>
+                                                        <option>Document filed</option>
+                                                        <option>Payment</option>
+                                                        <option>Custom/Other</option>
                                                     </select>
                                                 </div>
                                             </div>
@@ -940,23 +1037,82 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                             {tlForm.type === 'Custom/Other' && (
                                                 <div>
                                                     <label className={labelStyle}>Specify type</label>
-                                                    <input type="text" placeholder="Specify..." value={tlForm.customType} onChange={e => setTlForm({...tlForm, customType: e.target.value})} className={inputStyle}/>
+                                                    <input type="text" placeholder="Specify..." value={tlForm.customType} onChange={e => setTlForm({ ...tlForm, customType: e.target.value })} className={inputStyle} />
                                                 </div>
                                             )}
 
                                             <div>
                                                 <label className={labelStyle}>Assigned staff</label>
-                                                <select value={tlForm.staffId} onChange={e => setTlForm({...tlForm, staffId: e.target.value})} className={inputStyle}>
+                                                <select value={tlForm.staffId} onChange={e => setTlForm({ ...tlForm, staffId: e.target.value })} className={inputStyle}>
                                                     <option value="">Select staff...</option>{staffList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                                 </select>
                                             </div>
 
                                             <div>
                                                 <label className={labelStyle}>Notes</label>
-                                                <textarea rows={3} value={tlForm.notes} onChange={e => setTlForm({...tlForm, notes: e.target.value})} className={inputStyle} placeholder="What happened or what is planned?"></textarea>
+                                                <textarea rows={3} value={tlForm.notes} onChange={e => setTlForm({ ...tlForm, notes: e.target.value })} className={inputStyle} placeholder="What happened or what is planned?"></textarea>
                                             </div>
 
-                                            <button onClick={handleAddTimeline} disabled={tlSaving} className={`${primaryBtn} w-full`}><Save size={16}/> {tlSaving ? 'Saving...' : 'Save event'}</button>
+                                            {/* Optional Attachments for Timeline Event */}
+                                            <div className="space-y-2.5 pt-2 border-t border-slate-200/80 dark:border-[#465769]/40">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-xs font-semibold text-[#465769] dark:text-slate-300">Attachments (optional)</label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setTlDocs(prev => [...prev, { id: Date.now().toString(), name: '', file: null }])}
+                                                        className="inline-flex items-center gap-1 text-xs font-semibold text-[#2A3642] dark:text-slate-200 hover:underline cursor-pointer"
+                                                    >
+                                                        <Plus size={13} /> Add file
+                                                    </button>
+                                                </div>
+                                                {tlDocs.map((d, i) => (
+                                                    <div
+                                                        key={d.id || i}
+                                                        className="flex flex-wrap sm:flex-nowrap gap-2.5 items-center bg-white dark:bg-[#182028] p-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-500/70"
+                                                    >
+                                                        <input
+                                                            type="text"
+                                                            value={d.name}
+                                                            onChange={e =>
+                                                                setTlDocs(prev =>
+                                                                    prev.map((item, idx) => (idx === i ? { ...item, name: e.target.value } : item))
+                                                                )
+                                                            }
+                                                            placeholder="Document title"
+                                                            className="px-3 py-2 bg-[#F8FAFC] dark:bg-[#2A3642] border border-slate-300 dark:border-slate-500/60 rounded-lg w-full sm:w-2/5 text-xs font-semibold text-[#2A3642] dark:text-white outline-none"
+                                                        />
+                                                        <input
+                                                            type="file"
+                                                            onChange={e => {
+                                                                const selectedFile = e.target.files?.[0] || null;
+                                                                setTlDocs(prev =>
+                                                                    prev.map((item, idx) =>
+                                                                        idx === i
+                                                                            ? {
+                                                                                ...item,
+                                                                                file: selectedFile,
+                                                                                name: item.name.trim() || selectedFile?.name || '',
+                                                                            }
+                                                                            : item
+                                                                    )
+                                                                );
+                                                            }}
+                                                            className="flex-1 min-w-0 text-xs font-medium text-slate-700 dark:text-slate-100 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-[#2A3642] file:text-white dark:file:bg-slate-200 dark:file:text-[#182028] hover:file:opacity-90 file:cursor-pointer"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTlDocs(prev => prev.filter((_, idx) => idx !== i))}
+                                                            className="p-1.5 text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer"
+                                                        >
+                                                            <Trash2 size={15} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <button onClick={handleAddTimeline} disabled={tlSaving} className={`${primaryBtn} w-full`}>
+                                                <Save size={16} /> {tlSaving ? 'Saving...' : 'Save event'}
+                                            </button>
                                         </div>
                                     ) : (
                                         <button onClick={() => setShowTlForm(true)} className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl border-2 border-dashed border-slate-300 dark:border-[#465769]/60 text-sm font-semibold text-[#465769] dark:text-slate-300 hover:border-[#465769] hover:bg-[#F8FAFC] dark:hover:bg-[#1E2730] transition cursor-pointer">
@@ -986,17 +1142,15 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                     <div className="flex justify-between items-start gap-3">
                                                         <div className="min-w-0">
                                                             <div className="flex flex-wrap items-center gap-2">
-    <span className="text-sm font-bold text-[#2A3642] dark:text-white">
-        {item.type === 'Custom/Other' ? item.customType : item.type}
-    </span>
-                                                                <span
-                                                                    className={`text-xs font-semibold px-2 py-0.5 rounded-md ${timelineBadgeStyle(item.status || 'Pending')}`}>
-        {item.status || 'Pending'}
-    </span>
+                                                                <span className="text-sm font-bold text-[#2A3642] dark:text-white">
+                                                                    {item.type === 'Custom/Other' ? item.customType : item.type}
+                                                                </span>
+                                                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${timelineBadgeStyle(item.status || 'Pending')}`}>
+                                                                    {item.status || 'Pending'}
+                                                                </span>
                                                             </div>
                                                             <p className="text-xs font-medium text-[#465769] dark:text-slate-400 mt-1 flex items-center gap-1.5">
-                                                                <Calendar
-                                                                    size={13}/> {new Date(item.date).toDateString()}
+                                                                <Calendar size={13} /> {new Date(item.date).toDateString()}
                                                             </p>
                                                         </div>
 
@@ -1004,7 +1158,11 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                             <div className="relative shrink-0">
                                                                 <button
                                                                     onClick={() => setActiveDropdown(activeDropdown === item.id ? null : item.id)}
-                                                                    aria-label="Actions" className="text-slate-400 hover:text-[#2A3642] dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-[#354453] transition cursor-pointer"><MoreVertical size={18}/></button>
+                                                                    aria-label="Actions"
+                                                                    className="text-slate-400 hover:text-[#2A3642] dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-[#354453] transition cursor-pointer"
+                                                                >
+                                                                    <MoreVertical size={18} />
+                                                                </button>
 
                                                                 {activeDropdown === item.id && (
                                                                     <>
@@ -1032,6 +1190,28 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                                     </div>
 
                                                     {item.notes && <p className="text-sm text-[#2A3642] dark:text-slate-300 mt-3 whitespace-pre-wrap">{item.notes}</p>}
+
+                                                    {item.docs && item.docs.length > 0 && (
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                            {item.docs.map((docItem: any, idx: number) => (
+                                                                <button
+                                                                    key={idx}
+                                                                    type="button"
+                                                                    onClick={() =>
+                                                                        setPreviewDoc({
+                                                                            isOpen: true,
+                                                                            name: docItem.name || `Attachment ${idx + 1}`,
+                                                                            url: docItem.url,
+                                                                        })
+                                                                    }
+                                                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-[#2A3642] border border-slate-200 dark:border-[#465769]/60 text-xs font-semibold text-[#2A3642] dark:text-slate-200 hover:border-[#465769] transition cursor-pointer"
+                                                                >
+                                                                    <FileText size={13} /> {docItem.name}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
                                                     <p className="mt-3 text-xs text-slate-400">Updated by <span className="font-semibold text-[#2A3642] dark:text-slate-200">{item.staffName}</span></p>
                                                 </div>
                                             </li>
@@ -1056,21 +1236,25 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                                 <div className="p-5 sm:p-6 space-y-6">
                                     <div className="bg-[#F8FAFC] dark:bg-[#1E2730] p-5 rounded-xl border border-slate-200/80 dark:border-[#465769]/40 space-y-3">
                                         <div className="flex items-center justify-between gap-3">
-                                            <h3 className="font-bold text-sm text-[#2A3642] dark:text-white flex items-center gap-2"><Send size={16} className="text-[#465769] dark:text-slate-400"/> New message</h3>
+                                            <h3 className="font-bold text-sm text-[#2A3642] dark:text-white flex items-center gap-2"><Send size={16} className="text-[#465769] dark:text-slate-400" /> New message</h3>
                                             <p className="text-xs text-[#465769] dark:text-slate-400">To <span className="font-semibold text-[#2A3642] dark:text-white">{caseData.clientName}</span> ({caseData.contactNo})</p>
                                         </div>
                                         <textarea rows={4} value={smsMessage} onChange={e => setSmsMessage(e.target.value)} className={inputStyle} placeholder="Type your message to the client..."></textarea>
                                         <div className="flex items-center justify-between">
                                             <span className="text-xs text-slate-400">{smsMessage.length} characters</span>
-                                            <button onClick={handleSendSms} disabled={smsSending || !smsMessage.trim()} className={primaryBtn}>{smsSending ? 'Sending...' : <><Send size={15}/> Send SMS</>}</button>
+                                            <button onClick={handleSendSms} disabled={smsSending || !smsMessage.trim()} className={primaryBtn}>{smsSending ? 'Sending...' : <><Send size={15} /> Send SMS</>}</button>
                                         </div>
                                     </div>
 
                                     <div className="space-y-4">
                                         <div className="flex justify-between items-center gap-3">
-                                            <h3 className="font-bold text-sm text-[#2A3642] dark:text-white flex items-center gap-2"><History size={16} className="text-[#465769] dark:text-slate-400"/> Sent history</h3>
-                                            <select value={smsFilter} onChange={e => {setSmsFilter(e.target.value); setSmsPage(1);}} className="px-3 py-2 text-xs font-semibold border border-slate-200 dark:border-[#465769]/50 rounded-lg bg-white dark:bg-[#1E2730] text-[#2A3642] dark:text-white outline-none cursor-pointer focus:border-[#465769]">
-                                                <option value="ALL">All time</option><option value="TODAY">Today</option><option value="LAST_7">Past 7 days</option><option value="THIS_MONTH">This month</option><option value="LAST_3_MONTHS">Last 3 months</option>
+                                            <h3 className="font-bold text-sm text-[#2A3642] dark:text-white flex items-center gap-2"><History size={16} className="text-[#465769] dark:text-slate-400" /> Sent history</h3>
+                                            <select value={smsFilter} onChange={e => { setSmsFilter(e.target.value); setSmsPage(1); }} className="px-3 py-2 text-xs font-semibold border border-slate-200 dark:border-[#465769]/50 rounded-lg bg-white dark:bg-[#1E2730] text-[#2A3642] dark:text-white outline-none cursor-pointer focus:border-[#465769]">
+                                                <option value="ALL">All time</option>
+                                                <option value="TODAY">Today</option>
+                                                <option value="LAST_7">Past 7 days</option>
+                                                <option value="THIS_MONTH">This month</option>
+                                                <option value="LAST_3_MONTHS">Last 3 months</option>
                                             </select>
                                         </div>
 
@@ -1097,9 +1281,9 @@ export default function AdvancedCaseViewPage(props: PageProps) {
 
                                         {smsPageCount > 1 && (
                                             <div className="flex justify-between items-center pt-2">
-                                                <button disabled={smsPage === 1} onClick={() => setSmsPage(p => p-1)} className={`${ghostBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>Previous</button>
+                                                <button disabled={smsPage === 1} onClick={() => setSmsPage(p => p - 1)} className={`${ghostBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>Previous</button>
                                                 <span className="text-xs font-medium text-[#465769] dark:text-slate-300">Page {smsPage} of {smsPageCount}</span>
-                                                <button disabled={smsPage === smsPageCount} onClick={() => setSmsPage(p => p+1)} className={`${ghostBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>Next</button>
+                                                <button disabled={smsPage === smsPageCount} onClick={() => setSmsPage(p => p + 1)} className={`${ghostBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>Next</button>
                                             </div>
                                         )}
                                     </div>
@@ -1163,12 +1347,12 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                         <p className="text-xs text-[#465769] dark:text-slate-300 mb-4">
                             To <strong className="text-[#2A3642] dark:text-white">{caseData.clientName}</strong> ({caseData.contactNo}). You can edit the message before sending.
                         </p>
-                        <textarea rows={7} value={tlSmsModal.message} onChange={(e) => setTlSmsModal({...tlSmsModal, message: e.target.value})} className={inputStyle}></textarea>
+                        <textarea rows={7} value={tlSmsModal.message} onChange={(e) => setTlSmsModal({ ...tlSmsModal, message: e.target.value })} className={inputStyle}></textarea>
                         <p className="text-xs text-slate-400 mt-1.5">{tlSmsModal.message.length} characters</p>
                         <div className="flex gap-3 justify-end mt-6">
                             <button onClick={() => setTlSmsModal({ isOpen: false, message: '' })} className={`${ghostBtn} px-5 py-2.5 text-sm`}>Cancel</button>
                             <button onClick={sendTimelineSms} disabled={tlSmsSending} className={primaryBtn}>
-                                {tlSmsSending ? 'Sending...' : <><Send size={14}/> Send SMS</>}
+                                {tlSmsSending ? 'Sending...' : <><Send size={14} /> Send SMS</>}
                             </button>
                         </div>
                     </div>
@@ -1209,6 +1393,7 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                     </div>
                 </div>
             )}
+
             {/* ================= DOCUMENT PREVIEW & PRINT MODAL ================= */}
             {previewDoc.isOpen && (
                 <div className="fixed mt-14 inset-0 z-[140] flex items-center justify-center bg-[#2A3642]/80 backdrop-blur-xs p-3 sm:p-6">
@@ -1223,6 +1408,14 @@ export default function AdvancedCaseViewPage(props: PageProps) {
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
+                                <a
+                                    href={previewDoc.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={ghostBtn}
+                                >
+                                    <ExternalLink size={14} /> Open / Download
+                                </a>
                                 <button
                                     type="button"
                                     onClick={handlePrintPreviewDoc}
