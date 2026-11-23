@@ -2,13 +2,11 @@ import { NextResponse } from 'next/server';
 import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin';
 import { sendStaffInviteEmail } from '@/lib/brevo';
 
-// ❌ export const runtime = 'nodejs'; (මෙම පේළිය ඉවත් කර ඇත)
-
 export async function POST(req: Request) {
     try {
-        // අනිවාර්යයෙන්ම await භාවිතා කළ යුතුය (කලින් පියවරේ සැකසූ පරිදි)
-        const adminAuth = await getAdminAuth();
-        const adminDb = await getAdminDb();
+        // මෙතැන දැන් await අවශ්‍ය නොවේ
+        const adminAuth = getAdminAuth();
+        const adminDb = getAdminDb();
 
         const body = await req.json();
         const { email, name, role, permissions, firmId } = body;
@@ -20,17 +18,14 @@ export async function POST(req: Request) {
             );
         }
 
-        // 1. Generate a secure random temporary password
         const tempPassword = Math.random().toString(36).slice(-8) + 'A1!';
 
-        // 2. Create User in Firebase Auth via Admin SDK
         const userRecord = await adminAuth.createUser({
             email: email.trim(),
             password: tempPassword,
             displayName: name.trim(),
         });
 
-        // 3. Save User Data and Permissions in Firestore
         await adminDb.collection('users').doc(userRecord.uid).set({
             email: email.trim(),
             name: name.trim(),
@@ -42,7 +37,6 @@ export async function POST(req: Request) {
             createdAt: new Date().toISOString(),
         });
 
-        // 4. Send Email via Brevo/Nodemailer
         try {
             await sendStaffInviteEmail(email.trim(), tempPassword, role);
         } catch (emailError: any) {

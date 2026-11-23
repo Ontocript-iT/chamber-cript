@@ -10,8 +10,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Unauthorized request.' }, { status: 401 });
         }
 
-        const adminAuth = await getAdminAuth();
-        const adminDb = await getAdminDb();
+        const adminAuth = getAdminAuth();
+        const adminDb = getAdminDb();
 
         // 1. Verify the caller is a SUPER_ADMIN
         const decoded = await adminAuth.verifyIdToken(idToken);

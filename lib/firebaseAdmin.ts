@@ -1,25 +1,20 @@
-import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
+import * as admin from 'firebase-admin';
 
-function getAdminApp(): App {
-    const existingApps = getApps();
-    if (existingApps.length > 0) {
-        return existingApps[0]!;
-    }
-
+if (!admin.apps.length) {
     const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+
+    // Netlify හි \n නිවැරදිව කියවීම
     const privateKey = process.env.FIREBASE_PRIVATE_KEY
         ?.replace(/^"|"$/g, '')
         .replace(/\\n/g, '\n');
 
     if (!projectId || !clientEmail || !privateKey) {
-        throw new Error(
-            `Missing Firebase Admin env vars -> projectId: ${!!projectId}, clientEmail: ${!!clientEmail}, privateKey: ${!!privateKey}`
-        );
+        throw new Error("Missing Firebase Admin environment variables.");
     }
 
-    return initializeApp({
-        credential: cert({
+    admin.initializeApp({
+        credential: admin.credential.cert({
             projectId,
             clientEmail,
             privateKey,
@@ -27,15 +22,6 @@ function getAdminApp(): App {
     });
 }
 
-// ESM දෝෂය සම්පූර්ණයෙන්ම මඟ හැරීමට Dynamic Import (await import) භාවිතා කිරීම
-export async function getAdminAuth() {
-    const app = getAdminApp();
-    const { getAuth } = await import('firebase-admin/auth');
-    return getAuth(app);
-}
-
-export async function getAdminDb() {
-    const app = getAdminApp();
-    const { getFirestore } = await import('firebase-admin/firestore');
-    return getFirestore(app);
-}
+// v11 හිදී මෙය සෘජුවම ලබාගත හැක (Async / Await අවශ්‍ය නොවේ)
+export const getAdminAuth = () => admin.auth();
+export const getAdminDb = () => admin.firestore();
